@@ -1280,6 +1280,7 @@ class SpiffyTitles(callbacks.Plugin):
             request = requests.get(url, headers=headers, timeout=10, allow_redirects=True)
 
             is_redirect = False
+            real_domain = None
             if request.history:
                 # check the top two domain levels
                 link_domain = self.get_base_domain(request.history[0].url)

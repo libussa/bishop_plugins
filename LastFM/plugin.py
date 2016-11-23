@@ -262,7 +262,7 @@ class LastFM(callbacks.Plugin):
                     time = "(now)"
         
                 public_url = ''
-                nickquiet = nick[:-1] + ':.' + nick[-1:]
+                nickquiet = nick[:-1] + '.' + nick[-1:]
                 s = '%14s: %s by %s %s %s. %s' % (nickquiet, ircutils.bold(track),
                     ircutils.bold(artist), album, time, public_url)
                 

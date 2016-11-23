@@ -73,7 +73,7 @@ conf.registerChannelValue(SpiffyTitles, 'useBold',
 
 # Title template - show a warning if redirects to a different domain
 conf.registerChannelValue(SpiffyTitles, 'defaultTitleTemplate',
-     registry.String("{% if redirect %}(REDIRECT) {% endif %}^ {{title}}", _("""Template used for default title responses""")))
+     registry.String("{% if redirect %}({{real_domain}}) {% endif %}^ {{title}}", _("""Template used for default title responses""")))
 
 # YouTube template
 conf.registerChannelValue(SpiffyTitles, 'youtubeTitleTemplate',

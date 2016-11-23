@@ -791,13 +791,13 @@ class SpiffyTitles(callbacks.Plugin):
         if default_handler_enabled:
             log.debug("SpiffyTitles: calling default handler for %s" % (url))
             default_template = Template(self.registryValue("defaultTitleTemplate", channel=channel))
-            (html, is_redirect) = self.get_source_by_url(url)
+            (html, is_redirect, real_domain) = self.get_source_by_url(url)
 
             if html is not None and html:
                 title = self.get_title_from_html(html)
 
                 if title is not None:
-                    title_template = default_template.render(title=title, redirect=is_redirect)
+                    title_template = default_template.render(title=title, redirect=is_redirect, real_domain=real_domain)
 
                     return title_template
         else:
@@ -1268,7 +1268,7 @@ class SpiffyTitles(callbacks.Plugin):
         if retries >= max_retries:
             log.debug("SpiffyTitles: hit maximum retries for %s" % url)
 
-            return (None, False)
+            return (None, False, None)
 
         log.debug("SpiffyTitles: attempt #%s for %s" % (retries, url))
 
@@ -1302,7 +1302,7 @@ class SpiffyTitles(callbacks.Plugin):
                     text = request.content
 
                     if text:
-                        return (text, is_redirect)
+                        return (text, is_redirect, real_domain)
                     else:
                         log.debug("SpiffyTitles: empty content from %s" % (url))
 
@@ -1334,7 +1334,7 @@ class SpiffyTitles(callbacks.Plugin):
         except requests.exceptions.InvalidURL as e:
             log.error("SpiffyTitles InvalidURL: %s" % (str(e)))
 
-        return (None, False)
+        return (None, False, None)
 
     def get_base_domain(self, url):
         """

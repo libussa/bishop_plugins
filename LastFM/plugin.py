@@ -191,9 +191,9 @@ class LastFM(callbacks.Plugin):
                     # entire np request to fail.
                     log.exception("LastFM: failed to get YouTube link for track %s - %s", artist, track)
         if time == "(now)":
-            s = 'is listenning to %s by %s %s %s' % (ircutils.bold(track),ircutils.bold(artist), album, public_url)
+            s = '%s by %s %s %s' % (ircutils.bold(track),ircutils.bold(artist), album, public_url)
         else:
-            s = 'listened to %s by %s %s %s %s' % (ircutils.bold(track),ircutils.bold(artist), album, time, public_url)
+            s = '%s by %s %s %s %s' % (ircutils.bold(track),ircutils.bold(artist), album, time, public_url)
             
         irc.reply(utils.str.normalizeWhitespace(s))
 
@@ -262,12 +262,12 @@ class LastFM(callbacks.Plugin):
                     time = "(now)"
         
                 public_url = ''
-                nickquiet = nick[:-1] + '.' + nick[-1:]
+                nickquiet = nick[:-1] + u"\u2063" + nick[-1:]
                 s = '%14s: %s by %s %s %s. %s' % (nickquiet, ircutils.bold(track),
                     ircutils.bold(artist), album, time, public_url)
                 
-                irc.reply(utils.str.normalizeWhitespace(s),prefixNick=False)
-                # irc.reply(s,prefixNick=False)
+                # irc.reply(utils.str.normalizeWhitespace(s),prefixNick=False)
+                irc.reply(s,prefixNick=False)
         
     @wrap(["something"])
     def set(self, irc, msg, args, newId):

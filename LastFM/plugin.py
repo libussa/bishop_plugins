@@ -116,6 +116,29 @@ class LastFM(callbacks.Plugin):
         world.flushers.remove(self.db.flush)
         self.db.flush()
         self.__parent.die()
+        
+    def get_artist_tags(self, artist, irc):
+        """
+       Retourne les tags pour un artiste donné
+       :param artist: Nom de l'artiste
+       :param irc: irc
+       :return: liste de tags
+       """
+        apiKey = self.registryValue("apiKey")
+        url = "%sapi_key=%s&method=artist.getinfo&artist=%s&format=json" % (self.APIURL, apiKey, artist)
+        tags = []
+        try:
+            f = utils.web.getUrl(url).decode("utf-8")
+            data = json.loads(f)['artist']['tags']['tag']
+            for tag in data:
+                tags.append(tag['name'])
+        except utils.web.Error:
+            irc.error("Unknown artist %s." % artist, Raise=True)
+        except KeyError:
+            irc.error("Unknown artist %s." % artist, Raise=True)
+        self.log.debug("LastFM.artist.getinfos: url %s", url)
+ 
+        return tags
 
     @wrap([optional("something")])
     def np(self, irc, msg, args, user):
@@ -161,8 +184,9 @@ class LastFM(callbacks.Plugin):
         track = trackdata["name"].strip()  # Track name
         # Album name (may or may not be present)
         album = trackdata["album"]["#text"].strip()
-        if album:
-            album = ircutils.bold("[%s]" % album)
+        tags = self.get_artist_tags(artist, irc)
+        # if album:
+            # album = ircutils.bold("[%s]" % album)
 
         try:
             time = int(trackdata["date"]["uts"])  # Time of last listen
@@ -171,7 +195,7 @@ class LastFM(callbacks.Plugin):
             #time = "at %s" % datetime.fromtimestamp(time).strftime(tformat)
             time = "(%s)" % humanize.naturaltime(datetime.now() - datetime.fromtimestamp(time))
         except KeyError:  # Nothing given by the API?
-            time = "(now)"
+            time = ""
 
         public_url = ''
         # If the DDG plugin from this repository is loaded, we can integrate
@@ -190,11 +214,10 @@ class LastFM(callbacks.Plugin):
                     # If something breaks, log the error but don't cause the
                     # entire np request to fail.
                     log.exception("LastFM: failed to get YouTube link for track %s - %s", artist, track)
-        if time == "(now)":
-            s = '%s by %s %s %s' % (ircutils.bold(track),ircutils.bold(artist), album, public_url)
-        else:
-            s = '%s by %s %s %s %s' % (ircutils.bold(track),ircutils.bold(artist), album, time, public_url)
-            
+        # if time == "(now)":
+        # s = '%s | %s | %s | %s | %s | %s' % (track,artist, album, public_url,', '.join(tags), time)
+        s = '♫ %s 🎤 %s 💿 %s 📺 %s %s %s' % (track,artist, album, public_url,', '.join(tags), time)
+         
         irc.reply(utils.str.normalizeWhitespace(s))
 
 #    @wrap([optional("something")])

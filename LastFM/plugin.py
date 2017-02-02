@@ -223,7 +223,9 @@ class LastFM(callbacks.Plugin):
                     log.exception("LastFM: failed to get YouTube link for track %s - %s", artist, track)
         # if time == "(now)":
         # s = '%s | %s | %s | %s | %s | %s' % (track,artist, album, public_url,', '.join(tags), time)
-        s = '%s \u2014 %s \u2014 %s \u2014 %s %s' % (artist,track,tag_list, public_url, time)
+        # s = '%s \u2014 %s \u2014 %s \u2014 %s %s' % (artist,track,tag_list, public_url, time)
+        response = [artist, track, tag_list, public_url, time]
+        s = ' \u2014 '.join(filter(None, response))
          
         irc.reply(utils.str.normalizeWhitespace(s))        
 

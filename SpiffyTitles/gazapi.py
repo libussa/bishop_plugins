@@ -6,6 +6,7 @@ for all sites.
 """
 import configparser
 import requests
+from html import unescape
 
 HEADERS = {
     'Connection': 'keep-alive',
@@ -120,7 +121,7 @@ class GazAPI(object):
         params.update(kwargs)
         req = self.session.get(ajax_url, params=params, allow_redirects=False)
         try:
-            json_response = req.json()
+            json_response = unescape(req.json())
             if json_response['status'] != 'success':
                 raise RequestException("Failed ajax request for " + action)
             return json_response['response']

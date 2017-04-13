@@ -65,7 +65,7 @@ class SpiffyTitles(callbacks.Plugin):
         """
         Adds all handlers
         """
-        self.add_youtube_handlers(handlers)
+        self.add_youtube_handlers()
         self.add_imdb_handlers()
         self.add_imgur_handlers()
         self.add_coub_handlers()
@@ -95,14 +95,14 @@ class SpiffyTitles(callbacks.Plugin):
 
 
     def add_gazelle_handlers(self):
-        red = GazAPI('gazelle.conf', 'redacted')
-        self.handlers["redacted.ch"] = self.handler_gazelle(api=red)
+        self.api_red = GazAPI('/home/bishop/bishop_plugins/SpiffyTitles/gazelle.conf', 'redacted')
+        self.handlers["redacted.ch"] = self.handler_redacted
 
-        apl = GazAPI('gazelle.conf', 'apl')
-        self.handlers["apollo.rip"] = self.handler_gazelle(api=apl)
+        self.api_apl = GazAPI('/home/bishop/bishop_plugins/SpiffyTitles/gazelle.conf', 'apl')
+        self.handlers["apollo.rip"] = self.handler_apl
 
 
-    def handler_gazelle(self, url, info, channel, api):
+    def handler_redacted(self, url, info, channel):
         """
         Queries gazelle API for additional information about tracker links.
 
@@ -111,10 +111,23 @@ class SpiffyTitles(callbacks.Plugin):
         args = gazelle_parse_url(url)
 
         if args:
-            result = gazelle_info(args, api)
+            result = gazelle_info(args, api_red)
             return result
-        else:
-            log.debug("Unsupoorted or bad gazelle link!")
+
+
+
+    def handler_apl(self, url, info, channel):
+        """
+        Queries gazelle API for additional information about tracker links.
+
+        This handler is for any compatible gazelle site.
+        """
+        args = gazelle_parse_url(url)
+
+        if args:
+            result = gazelle_info(args, api_apl)
+            return result
+
 
 
     def human_bounty(value):
@@ -1671,4 +1684,3 @@ class GazAPI(object):
             return json_response['response']
         except ValueError:
             raise RequestException("Failed ajax request for " + action)
-        

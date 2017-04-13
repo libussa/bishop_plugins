@@ -1,1 +1,3 @@
 *.pyc
+*gazelle.conf
+*tmp.py

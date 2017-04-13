@@ -14,9 +14,9 @@ import re
 import requests
 try:
     from urllib.parse import urlencode
-    from urllib.parse import urlparse, parse_qsl
+    from urllib.parse import urlparse, parse_qsl, parse_qs
 except ImportError:
-    from urllib.parse import urlencode, urlparse, parse_qsl
+    from urllib.parse import urlencode, urlparse, parse_qsl, parse_qs
 from bs4 import BeautifulSoup
 import random
 import json
@@ -29,6 +29,9 @@ import unicodedata
 import supybot.ircdb as ircdb
 import supybot.log as log
 import pytz
+from math import log
+from gazapi import GazAPI
+
 
 try:
     from supybot.i18n import PluginInternationalization
@@ -62,7 +65,7 @@ class SpiffyTitles(callbacks.Plugin):
         """
         Adds all handlers
         """
-        self.add_youtube_handlers()
+        self.add_youtube_handlers(handlers)
         self.add_imdb_handlers()
         self.add_imgur_handlers()
         self.add_coub_handlers()
@@ -70,6 +73,7 @@ class SpiffyTitles(callbacks.Plugin):
         self.add_dailymotion_handlers()
         self.add_wikipedia_handlers()
         self.add_reddit_handlers()
+        self.add_gazelle_handlers()
 
     def add_dailymotion_handlers(self):
         self.handlers["www.dailymotion.com"] = self.handler_dailymotion
@@ -88,6 +92,129 @@ class SpiffyTitles(callbacks.Plugin):
     def add_reddit_handlers(self):
         self.handlers["reddit.com"] = self.handler_reddit
         self.handlers["www.reddit.com"] = self.handler_reddit
+
+
+    def add_gazelle_handlers(self):
+        red = GazAPI('gazelle.conf', 'redacted')
+        self.handlers["redacted.ch"] = self.handler_gazelle(api=red)
+
+        apl = GazAPI('gazelle.conf', 'apl')
+        self.handlers["apollo.rip"] = self.handler_gazelle(api=apl)
+
+
+    def handler_gazelle(self, url, info, channel, api):
+        """
+        Queries gazelle API for additional information about tracker links.
+
+        This handler is for any compatible gazelle site.
+        """
+        args = gazelle_parse_url(url)
+
+        if args:
+            result = gazelle_info(args, api)
+            return result
+        else:
+            log.debug("Unsupoorted or bad gazelle link!")
+
+
+    def human_bounty(value):
+        """Return human readable data amount from Bytes."""
+        byteunits = ('B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB', 'EiB', 'ZiB', 'YiB')
+        exponent = int(log(value, 1024))
+        return "%.1f %s" % (float(value)/pow(1024, exponent), byteunits[exponent])
+
+
+    def gazelle_parse_url(url):
+        """Take url and return api arguments to make api call."""
+        url = urlparse(url)
+        query = parse_qs(url.query)
+        api_args = {}
+
+        if url.path == '/torrents.php':
+            if 'id' in query:
+                api_args = {'action': 'torrentgroup', 'id': query['id'][0]}
+            elif 'torrentid' in query:
+                api_args = {'action': 'torrent', 'id': query['torrentid'][0]}
+
+        elif url.path == '/requests.php':
+            if 'id' in query:
+                api_args = {'action': 'request', 'id': query['id'][0]}
+
+        elif url.path == '/forums.php':
+            api_args = {'action': 'forum'}
+            if 'threadid' in query:
+                api_args['type'] = 'viewthread'
+                api_args['threadid'] = query['threadid'][0]
+            elif 'forumid' in query:
+                api_args['type'] = 'viewforum'
+                api_args['forumid'] = query['forumid'][0]
+            else:
+                api_args = {}
+
+        elif url.path == '/collages.php':
+            if 'id' in query:
+                api_args = {'action': 'collage', 'id': query['id'][0]}
+
+        elif url.path == '/artist.php':
+            if 'id' in query:
+                api_args = {'action': 'artist', 'id': query['id'][0]}
+
+        if api_args == {}:
+            return None
+        else:
+            return api_args
+
+
+    def gazelle_nice_artists(r, t=5):
+        """Take json and returns nice artist list."""
+        artists = []
+        nice = []
+        for artist in r['musicInfo']['artists']:
+            artists.append(artist['name'])
+        length = len(artists)
+        if length <= 2:
+            nice = " and ".join(artists)
+        elif length < t:
+            nice = ", ".join(artists[:-1]) + " and " + artists[-1]
+        elif length == t:
+            nice = ", ".join(artists[:-1]) + " and 1 other"
+        else:
+            nice = ", ".join(artists[:t-1]) + " and {} others".format(length-(t-1))
+        return nice
+
+
+    def gazelle_info(args, api):
+        """From api arguments get a title for the page."""
+        r = api.request(**args)
+        if args['action'] == 'artist':
+            title = "Artist's page for %s" % r['name']
+
+        elif args['action'] == 'request':
+            if r['categoryName'] == 'Music':
+                title = "%s by %s" % (r['title'], gazelle_nice_artists(r))
+            else:
+                title = r['title']
+
+            title = "Request: %s for a %s bounty" % (
+                                        title, human_bounty(int(r['totalBounty'])))
+
+        elif args['action'] in {'torrentgroup', 'torrent'}:
+            if r['group']['categoryName'] == 'Music':
+                title = "%s by %s" % (r['group']['name'], gazelle_nice_artists(r['group']))
+            else:
+                title = r['group']['name']
+
+        elif args['action'] == 'forum' and 'forumid' in args:
+            title = "%s forum" % r['forumName']
+
+        elif args['action'] == 'forum' and 'threadid' in args:
+            title = "Thread: %s on %s forum" % (r['threadTitle'], r['forumName'])
+
+        elif args['action'] == 'collage':
+            title = "Collage: " + r['name']
+        else:
+            title = "Uncaught title"
+        return title
 
     def handler_dailymotion(self, url, info, channel):
         """

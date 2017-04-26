@@ -29,6 +29,7 @@ import unicodedata
 import supybot.ircdb as ircdb
 import supybot.log as log
 import pytz
+from . import gazapi
 
 
 try:
@@ -93,11 +94,11 @@ class SpiffyTitles(callbacks.Plugin):
 
 
     def add_gazelle_handlers(self):
-        self.api_red = GazAPI('/home/bishop/bishop_plugins/SpiffyTitles/gazelle.conf', 'redacted')
+        self.api_red = gazapi.GazAPI('/home/bishop/bishop_plugins/SpiffyTitles/gazelle.conf', 'redacted')
         self.handlers["redacted.ch"] = self.handler_redacted
         self.handlers["passtheheadphones.me"] = self.handler_redacted
 
-        self.api_apl = GazAPI('/home/bishop/bishop_plugins/SpiffyTitles/gazelle.conf', 'apl')
+        self.api_apl = gazapi.GazAPI('/home/bishop/bishop_plugins/SpiffyTitles/gazelle.conf', 'apl')
         self.handlers["apollo.rip"] = self.handler_apl
 
 
@@ -110,6 +111,7 @@ class SpiffyTitles(callbacks.Plugin):
         args = self.gazelle_parse_url(url)
 
         if args:
+            self.api_red.connect()
             result = self.gazelle_info(args, self.api_red)
             return "^ " + result
 
@@ -123,6 +125,7 @@ class SpiffyTitles(callbacks.Plugin):
         args = self.gazelle_parse_url(url)
 
         if args:
+            self.api_apl.connect()
             result = self.gazelle_info(args, self.api_apl)
             return "^ " + result
 

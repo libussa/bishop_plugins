@@ -70,8 +70,6 @@ class GazAPI(object):
             self.auth()
         except RequestException:
             self.login()
-        else:
-            self.login()
 
     def auth(self):
         """
@@ -121,9 +119,9 @@ class GazAPI(object):
         params.update(kwargs)
         req = self.session.get(ajax_url, params=params, allow_redirects=False)
         try:
-            json_response = unescape(req.json())
+            json_response = req.json()
             if json_response['status'] != 'success':
                 raise RequestException("Failed ajax request for " + action)
-            return json_response['response']
+            return unescape(json_response['response'])
         except ValueError:
             raise RequestException("Failed ajax request for " + action)

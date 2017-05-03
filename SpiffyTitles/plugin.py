@@ -30,6 +30,7 @@ import supybot.ircdb as ircdb
 import supybot.log as log
 import pytz
 from . import gazapi
+from html import unescape
 
 
 try:
@@ -113,7 +114,7 @@ class SpiffyTitles(callbacks.Plugin):
         if args:
             self.api_red.connect()
             result = self.gazelle_info(args, self.api_red)
-            return "^ " + result
+            return "^ " + unescape(result)
 
 
     def handler_apl(self, url, info, channel):
@@ -127,7 +128,7 @@ class SpiffyTitles(callbacks.Plugin):
         if args:
             self.api_apl.connect()
             result = self.gazelle_info(args, self.api_apl)
-            return "^ " + result
+            return "^ " + unescape(result)
 
     def gazelle_parse_url(self, url):
         """Take url and return api arguments to make api call."""

@@ -198,7 +198,7 @@ class LastFM(callbacks.Plugin):
         tags = self.get_artist_tags(artist, irc)
         try:
             tags.remove('seen live') # remove ce tag de merde
-        except (TypeError, ValueError) as e:
+        except:
             pass
 
         try:

@@ -196,7 +196,11 @@ class LastFM(callbacks.Plugin):
         # Album name (may or may not be present)
         album = trackdata["album"]["#text"].strip()
         tags = self.get_artist_tags(artist, irc)
-        if 'seen live' in tags: tags.remove('seen live') # remove ce tag de merde
+        try:
+            tags.remove('seen live') # remove ce tag de merde
+        except TypeError:
+            pass
+        
         try:
             tag_list = ', '.join(tags)
         except TypeError:

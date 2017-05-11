@@ -69,8 +69,6 @@ class GazAPI(object):
             self.auth()
         except RequestException:
             self.login()
-        else:
-            self.login()
 
     def auth(self):
         """

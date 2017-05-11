@@ -29,8 +29,8 @@ import unicodedata
 import supybot.ircdb as ircdb
 import supybot.log as log
 import pytz
-from math import log
-import configparser
+from . import gazapi
+from html import unescape
 
 
 try:
@@ -95,10 +95,11 @@ class SpiffyTitles(callbacks.Plugin):
 
 
     def add_gazelle_handlers(self):
-        self.api_red = GazAPI('/home/bishop/bishop_plugins/SpiffyTitles/gazelle.conf', 'redacted')
+        self.api_red = gazapi.GazAPI('/home/bishop/bishop_plugins/SpiffyTitles/gazelle.conf', 'redacted')
         self.handlers["redacted.ch"] = self.handler_redacted
+        self.handlers["passtheheadphones.me"] = self.handler_redacted
 
-        self.api_apl = GazAPI('/home/bishop/bishop_plugins/SpiffyTitles/gazelle.conf', 'apl')
+        self.api_apl = gazapi.GazAPI('/home/bishop/bishop_plugins/SpiffyTitles/gazelle.conf', 'apl')
         self.handlers["apollo.rip"] = self.handler_apl
 
 
@@ -108,12 +109,12 @@ class SpiffyTitles(callbacks.Plugin):
 
         This handler is for any compatible gazelle site.
         """
-        args = gazelle_parse_url(url)
+        args = self.gazelle_parse_url(url)
 
         if args:
-            result = gazelle_info(args, api_red)
-            return result
-
+            self.api_red.connect()
+            result = self.gazelle_info(args, self.api_red)
+            return "^ " + unescape(result)
 
 
     def handler_apl(self, url, info, channel):
@@ -122,22 +123,14 @@ class SpiffyTitles(callbacks.Plugin):
 
         This handler is for any compatible gazelle site.
         """
-        args = gazelle_parse_url(url)
+        args = self.gazelle_parse_url(url)
 
         if args:
-            result = gazelle_info(args, api_apl)
-            return result
+            self.api_apl.connect()
+            result = self.gazelle_info(args, self.api_apl)
+            return "^ " + unescape(result)
 
-
-
-    def human_bounty(value):
-        """Return human readable data amount from Bytes."""
-        byteunits = ('B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB', 'EiB', 'ZiB', 'YiB')
-        exponent = int(log(value, 1024))
-        return "%.1f %s" % (float(value)/pow(1024, exponent), byteunits[exponent])
-
-
-    def gazelle_parse_url(url):
+    def gazelle_parse_url(self, url):
         """Take url and return api arguments to make api call."""
         url = urlparse(url)
         query = parse_qs(url.query)
@@ -178,7 +171,7 @@ class SpiffyTitles(callbacks.Plugin):
             return api_args
 
 
-    def gazelle_nice_artists(r, t=5):
+    def gazelle_nice_artists(self, r, t=5):
         """Take json and returns nice artist list."""
         artists = []
         nice = []
@@ -196,7 +189,7 @@ class SpiffyTitles(callbacks.Plugin):
         return nice
 
 
-    def gazelle_info(args, api):
+    def gazelle_info(self, args, api):
         """From api arguments get a title for the page."""
         r = api.request(**args)
         if args['action'] == 'artist':
@@ -204,16 +197,16 @@ class SpiffyTitles(callbacks.Plugin):
 
         elif args['action'] == 'request':
             if r['categoryName'] == 'Music':
-                title = "%s by %s" % (r['title'], gazelle_nice_artists(r))
+                title = "%s by %s" % (r['title'], self.gazelle_nice_artists(r))
             else:
                 title = r['title']
 
             title = "Request: %s for a %s bounty" % (
-                                        title, human_bounty(int(r['totalBounty'])))
+                                        title, self.get_readable_file_size(int(r['totalBounty'])))
 
         elif args['action'] in {'torrentgroup', 'torrent'}:
             if r['group']['categoryName'] == 'Music':
-                title = "%s by %s" % (r['group']['name'], gazelle_nice_artists(r['group']))
+                title = "%s by %s" % (r['group']['name'], self.gazelle_nice_artists(r['group']))
             else:
                 title = r['group']['name']
 
@@ -1564,123 +1557,3 @@ class SpiffyTitles(callbacks.Plugin):
         return has_cap
 
 Class = SpiffyTitles
-
-HEADERS = {
-    'Connection': 'keep-alive',
-    'Cache-Control': 'max-age=0',
-    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_7_3) '
-                  'AppleWebKit/535.11 (KHTML, like Gecko) Chrome/17.0.963.79 '
-                  'Safari/535.11',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9 '
-              ',*/*;q=0.8',
-    'Accept-Encoding': 'gzip,deflate,sdch',
-    'Accept-Language': 'en-US,en;q=0.8',
-    'Accept-Charset': 'ISO-8859-1,utf-8;q=0.7,*;q=0.3'
-    }
-
-
-class LoginException(Exception):
-    """
-    Exception for when we hit an error logging in.
-
-    (either bad page response, or invalid login credentials).
-    """
-
-    pass
-
-
-class RequestException(Exception):
-    """Exception when we hit a page error when making a request to ajax.php."""
-
-    pass
-
-
-class GazAPI(object):
-    """
-    API for various gazelle sites.
-
-    Handles connections, authentication and simple ajax requests.
-    """
-
-    def __init__(self, config_file=None, site=None):
-        """API constructor. Reads values from config file."""
-        config = configparser.ConfigParser()
-        config.read(config_file)
-        if site in config:
-            self.username = config[site]['username']
-            self.password = config[site]['password']
-            self.site_url = config[site]['url'].rstrip('/')
-        else:
-            raise ValueError("Site %s missing from configuration file" % site)
-
-        self.session = None
-        self.user_id = None
-        self.authkey = None
-        self.connect()
-
-    def connect(self):
-        """Connect to the tracker if not already logged in."""
-        self.session = requests.Session()
-        self.session.headers.update(HEADERS)
-
-        try:
-            self.auth()
-        except RequestException:
-            self.login()
-        else:
-            self.login()
-
-    def auth(self):
-        """
-        Test Authentication for a user against the "index" API.
-
-        :raises: RequestException
-        """
-        account_info = self.request('index')
-        self.user_id = account_info['id']
-        self.authkey = account_info['authkey']
-
-    def login(self):
-        """
-        Log the user into the tracker by going through the login page.
-
-        Will not work with a captcha.
-        :raises: LoginException
-        """
-        login_url = self.site_url + '/login.php'
-        data = {'username': self.username, 'password': self.password}
-        req = self.session.post(login_url, data=data)
-        if req.status_code != 200:
-            raise LoginException("Issue communicating with the server...")
-        elif req.url == login_url:
-            raise LoginException("Could not authenticate that \
-                                                username/password combo")
-        account_info = self.request('index')
-        self.user_id = account_info['id']
-        self.authkey = account_info['authkey']
-
-    def request(self, action, **kwargs):
-        """
-        Make an AJAX request against the server to ajax.php.
-
-        The available actions are located on WhatCD's github page for gazelle
-        https://github.com/WhatCD/Gazelle/wiki/JSON-API-Documentation
-        If the request fails for whatever reason, a RequestException is raised.
-        :param action:
-        :param kwargs:
-        :return: dictionary representing json response
-        :raises: RequestException
-        """
-        ajax_url = self.site_url + "/ajax.php"
-        params = {'action': action}
-        if self.authkey:
-            params['auth'] = self.authkey
-        params.update(kwargs)
-        req = self.session.get(ajax_url, params=params, allow_redirects=False)
-        try:
-            json_response = req.json()
-            if json_response['status'] != 'success':
-                raise RequestException("Failed ajax request for " + action)
-            return json_response['response']
-        except ValueError:
-            raise RequestException("Failed ajax request for " + action)

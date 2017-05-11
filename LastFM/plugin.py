@@ -46,6 +46,11 @@ from datetime import datetime, timedelta
 import pickle
 import humanize
 from urllib import parse
+from apiclient.discovery import build
+from apiclient.errors import HttpError
+import logging
+
+logging.getLogger('googleapiclient.discovery_cache').setLevel(logging.ERROR)
 
 class LastFMDB():
     """
@@ -112,12 +117,15 @@ class LastFM(callbacks.Plugin):
 
         # 2.0 API (see http://www.lastfm.de/api/intro)
         self.APIURL = "http://ws.audioscrobbler.com/2.0/?"
+        self.youtube = build("youtube", "v3",
+          developerKey="AIzaSyDlRCditJ0QvbJLajRPMW3Y-r32CdOzVp4")
+
 
     def die(self):
         world.flushers.remove(self.db.flush)
         self.db.flush()
         self.__parent.die()
-        
+
     def get_artist_tags(self, artist, irc):
         """
        Retourne les tags pour un artiste donné
@@ -140,9 +148,9 @@ class LastFM(callbacks.Plugin):
             # irc.error("Unknown artist %s." % artist, Raise=True)
             return None
         self.log.debug("LastFM.artist.getinfos: url %s", url)
- 
-        return tags        
-        
+
+        return tags
+
     @wrap([optional("something")])
     def np(self, irc, msg, args, user):
         """[<user>]
@@ -205,32 +213,31 @@ class LastFM(callbacks.Plugin):
             time = ""
 
         public_url = ''
-        # If the DDG plugin from this repository is loaded, we can integrate
-        # that by finding a YouTube link for the track.
+        # Fetch a youtube link with google api
         if self.registryValue("fetchYouTubeLink"):
-            ddg = irc.getCallback("DDG")
-            if ddg:
-                # Each valid result has a preceding heading in the format
-                # '<td valign="top">1.&nbsp;</td>', etc.
-                try:
-                    search = [td for td in ddg._ddgurl('site:youtube.com "%s - %s"' % (artist, track))
-                              if "1." in td.text]
-                    res = search[0].next_sibling.next_sibling
-                    public_url = parse.unquote(res.a.get('href')[15:])
-                except:
-                    # If something breaks, log the error but don't cause the
-                    # entire np request to fail.
-                    log.exception("LastFM: failed to get YouTube link for track %s - %s", artist, track)
-        # if time == "(now)":
-        # s = '%s | %s | %s | %s | %s | %s' % (track,artist, album, public_url,', '.join(tags), time)
-        # s = '%s \u2014 %s \u2014 %s \u2014 %s %s' % (artist,track,tag_list, public_url, time)
+
+          try:
+            search_response = self.youtube.search().list(
+                                    q="%s %s" % (artist, track),
+                                    part="id",
+                                    maxResults=1,
+                                    type="video"
+                                ).execute()
+
+            videoID = search_response["items"][0]["id"]["videoId"]
+            public_url = "https://www.youtube.com/watch?v=" + videoID
+          except HttpError as e:
+            print("An HTTP error %d occurred:\n%s" % (e.resp.status, e.content))
+          except IndexError:
+            print("No video found")
+
         response = [artist, track, tag_list, public_url, time]
         s = ' \u2014 '.join(filter(None, response))
-         
-        irc.reply(utils.str.normalizeWhitespace(s))        
+
+        irc.reply(utils.str.normalizeWhitespace(s))
 
 #    @wrap([optional("something")])
-    @wrap       
+    @wrap
     def wp(self, irc, msg, args):
         """[<user>]
 
@@ -244,16 +251,16 @@ class LastFM(callbacks.Plugin):
                       "'config plugins.lastfm.apikey' and reload the plugin. "
                       "You can sign up for an API Key using "
                       "http://www.last.fm/api/account/create", Raise=True)
-                      
+
         channel = msg.args[0]
         L = list(irc.state.channels[channel].users)
-  
+
         for nick in L:
             hostmask = irc.state.nickToHostmask(nick)
             #irc.reply(hostmask, prefixNick=False)
 
-            user = self.db.get(hostmask)        
-    
+            user = self.db.get(hostmask)
+
             if user:
             # see http://www.lastfm.de/api/show/user.getrecenttracks
                 url = "%sapi_key=%s&method=user.getrecenttracks&user=%s&format=json" % (self.APIURL, apiKey, user)
@@ -262,28 +269,28 @@ class LastFM(callbacks.Plugin):
                 except utils.web.Error:
                     irc.error("Unknown user %s." % user, Raise=True)
                 self.log.debug("LastFM.nowPlaying: url %s", url)
-        
+
                 try:
                     data = json.loads(f)["recenttracks"]
                 except KeyError:
                     irc.error("Unknown user %s." % user, Raise=True)
-        
+
                 user = data["@attr"]["user"]
                 tracks = data["track"]
-        
+
                 # Work with only the first track.
                 try:
                     trackdata = tracks[0]
                 except IndexError:
                     irc.error("%s doesn't seem to have listened to anything." % user, Raise=True)
-        
+
                 artist = trackdata["artist"]["#text"].strip()  # Artist name
                 track = trackdata["name"].strip()  # Track name
                 # Album name (may or may not be present)
                 album = trackdata["album"]["#text"].strip()
                 if album:
                     album = ircutils.bold("[%s]" % album)
-        
+
                 try:
                     time = int(trackdata["date"]["uts"])  # Time of last listen
                     # Format this using the preferred time format.
@@ -292,19 +299,19 @@ class LastFM(callbacks.Plugin):
                     # time = ""
                 except KeyError:  # Nothing given by the API?
                     time = ""
-        
+
                     public_url = ''
                     nickquiet = nick[:-1] + u"\u2063" + nick[-1:]
                 # s = '%14s: %s by %s %s %s. %s' % (nickquiet, ircutils.bold(track),
                     # ircutils.bold(artist), album, time, public_url)
-                
+
                     s = '%-14s %-20s %s' % (nickquiet, artist, track)
                     irc.reply(s,prefixNick=False)
                 # irc.reply("nothing playing")
-                
+
                 # irc.reply(utils.str.normalizeWhitespace(s),prefixNick=False)
-                
-        
+
+
     @wrap(["something"])
     def set(self, irc, msg, args, newId):
         """<user>
@@ -394,18 +401,18 @@ class LastFM(callbacks.Plugin):
         else:
             nick = msg.nick
             user = self.db.get(msg.prefix)
-            
+
         if duration in ['overall', '7day', '1month', '3month', '6month', '12month']:
             duration = duration
         else:
             duration = "6month"
         duration_dict = {
-                'overall' : 'since forever', 
-                '7day'    : 'for the last week', 
-                '1month'  : 'for the last month', 
-                '3month'  : 'for the last 3 months', 
-                '6month'  : 'for the last 6 months', 
-                '12month' : 'for the last year'}    
+                'overall' : 'since forever',
+                '7day'    : 'for the last week',
+                '1month'  : 'for the last month',
+                '3month'  : 'for the last 3 months',
+                '6month'  : 'for the last 6 months',
+                '12month' : 'for the last year'}
 
         # Get library information for user
         #artists = [[],[]]
@@ -422,17 +429,17 @@ class LastFM(callbacks.Plugin):
         try:
             f = utils.web.getUrl(url).decode("utf-8")
         except utils.web.Error:
-            irc.error("Unknown LastFM user '%s'." % user, Raise=True) 
+            irc.error("Unknown LastFM user '%s'." % user, Raise=True)
         libraryList = json.loads(f)
 
-        
+
         for artist in libraryList["artists"]["artist"]:
             #artists.append(artist["name"])
             #artistsplays.append(artist["playcount"])
             outstr = outstr + (" %s [%s]," % (ircutils.bold(artist["name"]), artist["playcount"]))
         outstr = outstr[:-1]
 
-         
+
         #irc.reply("%s and %s have %d artists in common, out of %s artists" % (nick1,nick2,commonArtists,totalArtists))
         irc.reply(outstr)
     # topartists = wrap(topartists, ['int', many('anything')])

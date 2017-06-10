@@ -33,6 +33,7 @@ from supybot.commands import *
 import supybot.plugins as plugins
 import supybot.ircutils as ircutils
 import supybot.callbacks as callbacks
+import supybot.ircmsgs as ircmsgs
 try:
     from supybot.i18n import PluginInternationalization
     _ = PluginInternationalization('Emoji')
@@ -57,9 +58,17 @@ class Emoji(callbacks.Plugin):
 
         Grabs the last line said by <nick> and returns it with emojis translated
         """
-        for m in reversed(irc.state.history):
-            if m.command == 'PRIVMSG' and ircutils.nickEqual(m.nick, nick)
-                irc.reply("%s said: %s" % (nick, m))
+        chan = msg.args[0]
+        # a bit hacky, generates another list just to reverse. Need another way to access the i+1 when self-called
+        hist = list(reversed(irc.state.history))
+        for i in range(len(hist)-1):
+            if hist[i].command == 'PRIVMSG' and \
+               ircutils.nickEqual(hist[i].nick, nick) and \
+               ircutils.strEqual(hist[i].args[0], chan):
+                if ircutils.nickEqual(nick, msg.nick):
+                    irc.reply(ircmsgs.prettyPrint(hist[i+1]))
+                else:
+                    irc.reply(ircmsgs.prettyPrint(hist[i]))
                 return
         irc.error(_('I couldn\'t find a proper message to translate.'))
     wat = wrap(wat, ['seenNick'])

@@ -50,7 +50,7 @@ class Emoji(callbacks.Plugin):
 
          Returns the text with unicode emojis translated"""
         irc.reply(emoji.demojize(text))
-    emoji = wrap(emoji, many(['anything']))
+    emoji = wrap(emoji, ['text'])
 
 
 Class = Emoji

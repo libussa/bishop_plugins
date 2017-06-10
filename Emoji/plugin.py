@@ -52,6 +52,19 @@ class Emoji(callbacks.Plugin):
         irc.reply(emoji.demojize(text))
     emoji = wrap(emoji, ['text'])
 
+    def wat(self, irc, msg, args, nick):
+        """<nick>
+
+        Grabs the last line said by <nick> and returns it with emojis translated
+        """
+        for m in reversed(irc.state.history):
+            if m.command == 'PRIVMSG' and ircutils.nickEqual(m.nick, nick)
+                irc.reply("%s said: %s" % (nick, m))
+                return
+        irc.error(_('I couldn\'t find a proper message to translate.'))
+    wat = wrap(wat, ['seenNick'])
+
+
 
 Class = Emoji
 

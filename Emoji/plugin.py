@@ -66,9 +66,9 @@ class Emoji(callbacks.Plugin):
                ircutils.nickEqual(hist[i].nick, nick) and \
                ircutils.strEqual(hist[i].args[0], chan):
                 if ircutils.nickEqual(nick, msg.nick):
-                    irc.reply(ircmsgs.prettyPrint(hist[i+1]))
+                    irc.reply(emoji.demojize(ircmsgs.prettyPrint(hist[i+1])))
                 else:
-                    irc.reply(ircmsgs.prettyPrint(hist[i]))
+                    irc.reply(emoji.demojize(ircmsgs.prettyPrint(hist[i])))
                 return
         irc.error(_('I couldn\'t find a proper message to translate.'))
     wat = wrap(wat, ['seenNick'])

@@ -45,7 +45,7 @@ import emoji
 
 
 class Emoji(callbacks.Plugin):
-    """A plugin to deal with unico"a string: %s" % textde Emojis"""
+    """A plugin to deal with unicode Emojis"""
     def emoji(self, irc, msg, args, text):
         """<text>
 
@@ -59,21 +59,22 @@ class Emoji(callbacks.Plugin):
         Grabs the last line said by <nick> and returns it with emojis translated
         """
         chan = msg.args[0]
-        # a bit hacky, generates another list just to reverse. Need another way to access the i+1 when self-called
-        hist = list(reversed(irc.state.history))
-        for i in range(len(hist)-1):
-            if hist[i].command == 'PRIVMSG' and \
-               ircutils.nickEqual(hist[i].nick, nick) and \
-               ircutils.strEqual(hist[i].args[0], chan):
-                if ircutils.nickEqual(nick, msg.nick):
-                    irc.reply(emoji.demojize(ircmsgs.prettyPrint(hist[i+1])))
+        selfCaller = False
+        for m in reversed(irc.state.history):
+            if m.command == 'PRIVMSG' and \
+            ircutils.nickEqual(m.nick, nick) and \
+            ircutils.strEqual(m.args[0], chan):
+                if ircutils.nickEqual(nick, msg.nick) and selfCaller:
+                    irc.reply(emoji.demojize(ircmsgs.prettyPrint(m)))
+                    return
+                elif ircutils.nickEqual(nick, msg.nick):
+                    selfCaller = True
+                    continue
                 else:
-                    irc.reply(emoji.demojize(ircmsgs.prettyPrint(hist[i])))
-                return
+                    irc.reply(emoji.demojize(ircmsgs.prettyPrint(m)))
+                    return
         irc.error(_('I couldn\'t find a proper message to translate.'))
     wat = wrap(wat, ['seenNick'])
-
-
 
 Class = Emoji
 

@@ -40,11 +40,17 @@ except ImportError:
     # Placeholder that allows to run the plugin on a bot
     # without the i18n module
     _ = lambda x: x
+import emoji
 
 
 class Emoji(callbacks.Plugin):
-    """A plugin to deal with unicode Emojis"""
-    pass
+    """A plugin to deal with unico"a string: %s" % textde Emojis"""
+    def emoji(self, irc, msg, args, text):
+        """<text>
+
+         Returns the text with unicode emojis translated"""
+        irc.reply(emoji.demojize(text))
+    emoji = wrap(emoji, many(['anything']))
 
 
 Class = Emoji

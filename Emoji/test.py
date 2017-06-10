@@ -29,6 +29,7 @@
 ###
 
 from supybot.test import *
+import emoji
 
 
 class EmojiTestCase(PluginTestCase):

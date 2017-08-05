@@ -170,7 +170,8 @@ class LastFM(callbacks.Plugin):
             irc.error("use .set <LastFM username> first.", Raise=True)
 
         # see http://www.lastfm.de/api/show/user.getrecenttracks
-        url = "%sapi_key=%s&method=user.getrecenttracks&user=%s&format=json" % (self.APIURL, apiKey, user)
+        url = "%sapi_key=%s&method=user.getrecenttracks&user=%s&format=json&limit=2" \
+                % (self.APIURL, apiKey, user)
         try:
             f = utils.web.getUrl(url).decode("utf-8")
         except utils.web.Error:

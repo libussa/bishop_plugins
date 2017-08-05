@@ -170,7 +170,8 @@ class LastFM(callbacks.Plugin):
             irc.error("use .set <LastFM username> first.", Raise=True)
 
         # see http://www.lastfm.de/api/show/user.getrecenttracks
-        url = "%sapi_key=%s&method=user.getrecenttracks&user=%s&format=json" % (self.APIURL, apiKey, user)
+        url = "%sapi_key=%s&method=user.getrecenttracks&user=%s&format=json&limit=2" \
+                % (self.APIURL, apiKey, user)
         try:
             f = utils.web.getUrl(url).decode("utf-8")
         except utils.web.Error:
@@ -196,6 +197,28 @@ class LastFM(callbacks.Plugin):
         # Album name (may or may not be present)
         album = trackdata["album"]["#text"].strip()
         tags = self.get_artist_tags(artist, irc)
+
+        mbid = trackdata["mbid"].strip()
+
+        if mbid:
+            url_track = "%sapi_key=%s&method=track.getInfo&user=%s&mbid=%s&format=json" \
+                    % (self.APIURL, apiKey, user, mbid)
+        else:
+            url_track = "%sapi_key=%s&method=track.getInfo&user=%s&artist=%s&track=%s&format=json" \
+                    % (self.APIURL, apiKey, user, artist, track)
+
+        try:
+            ans = utils.web.getUrl(url_track).decode("utf-8")
+        except:
+            pass
+
+        try:
+            data_track = json.loads(ans)["track"]
+        except:
+            pass
+
+        playcount = data_track["userplaycount"].strip() + "x"
+
         try:
             tags.remove('seen live') # remove ce tag de merde
         except:
@@ -213,7 +236,7 @@ class LastFM(callbacks.Plugin):
             # Format this using the preferred time format.
             tformat = conf.supybot.reply.format.time()
             #time = "at %s" % datetime.fromtimestamp(time).strftime(tformat)
-            time = "(%s)" % humanize.naturaltime(datetime.now() - datetime.fromtimestamp(time))
+            time = "%s" % humanize.naturaltime(datetime.now() - datetime.fromtimestamp(time))
         except KeyError:  # Nothing given by the API?
             time = ""
 
@@ -236,7 +259,7 @@ class LastFM(callbacks.Plugin):
           except IndexError:
             print("No video found")
 
-        response = [artist, track, tag_list, public_url, time]
+        response = [artist, track, tag_list, public_url, time, playcount]
         s = ' \u2014 '.join(filter(None, response))
 
         irc.reply(utils.str.normalizeWhitespace(s))

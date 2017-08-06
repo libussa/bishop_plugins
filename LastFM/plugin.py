@@ -253,7 +253,7 @@ class LastFM(callbacks.Plugin):
                                 ).execute()
 
             videoID = search_response["items"][0]["id"]["videoId"]
-            public_url = "https://www.youtube.com/watch?v=" + videoID
+            public_url = "https://youtu.be/" + videoID
           except HttpError as e:
             print("An HTTP error %d occurred:\n%s" % (e.resp.status, e.content))
           except IndexError:

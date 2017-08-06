@@ -217,7 +217,10 @@ class LastFM(callbacks.Plugin):
         except:
             pass
 
-        playcount = data_track["userplaycount"].strip() + "x"
+        try:
+            playcount = data_track["userplaycount"].strip() + "x"
+        except:
+            playcount = ""
 
         try:
             tags.remove('seen live') # remove ce tag de merde

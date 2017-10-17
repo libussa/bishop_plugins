@@ -151,6 +151,16 @@ class LastFM(callbacks.Plugin):
 
         return tags
 
+    def check_apiKey(self, irc):
+        apiKey = self.registryValue("apiKey")
+        if not apiKey:
+            irc.error("The API Key is not set. Please set it via "
+                      "'config plugins.lastfm.apikey' and reload the plugin. "
+                      "You can sign up for an API Key using "
+                      "http://www.last.fm/api/account/create", Raise=True)
+
+        return apiKey
+
     @wrap([optional("something")])
     def np(self, irc, msg, args, user):
         """[<user>]
@@ -159,12 +169,9 @@ class LastFM(callbacks.Plugin):
         is not given, defaults to the LastFM user configured for your
         current nick.
         """
-        apiKey = self.registryValue("apiKey")
-        if not apiKey:
-            irc.error("The API Key is not set. Please set it via "
-                      "'config plugins.lastfm.apikey' and reload the plugin. "
-                      "You can sign up for an API Key using "
-                      "http://www.last.fm/api/account/create", Raise=True)
+
+        apiKey = self.check_apiKey(irc)
+
         user = (user or self.db.get(msg.prefix))
         if not user:
             irc.error("use .set <LastFM username> first.", Raise=True)
@@ -276,12 +283,7 @@ class LastFM(callbacks.Plugin):
         is not given, defaults to the LastFM user configured for your
         current nick.
         """
-        apiKey = self.registryValue("apiKey")
-        if not apiKey:
-            irc.error("The API Key is not set. Please set it via "
-                      "'config plugins.lastfm.apikey' and reload the plugin. "
-                      "You can sign up for an API Key using "
-                      "http://www.last.fm/api/account/create", Raise=True)
+        apiKey = self.check_apiKey(irc)
 
         channel = msg.args[0]
         L = list(irc.state.channels[channel].users)
@@ -399,21 +401,7 @@ class LastFM(callbacks.Plugin):
         # irc.reply("%(id)s (realname: %(realname)s) registered on %(registered)s; age: %(age)s / %(gender)s; "
                   # "Country: %(country)s; Tracks played: %(playcount)s" % profile)
 
-    @wrap([optional("something"), optional("something")])
-    def topartists(self, irc, msg, args, user, duration):
-        """[<user>] [<duration>]
-
-        Reports the top 10 artists for the user. Duration: overall | 7day | 1month | 3month | 6month | 12month (default: 6 months)
-        """
-        #irc.error("This command is not ready yet. Stay tuned!", Raise=True)
-
-        apiKey = self.registryValue("apiKey")
-        if not apiKey:
-            irc.error("The API Key is not set. Please set it via "
-                      "'config plugins.lastfm.apikey' and reload the plugin. "
-                      "You can sign up for an API Key using "
-                      "http://www.last.fm/api/account/create", Raise=True)
-
+    def check_user(self, msg, user, irc):
         if user != None:
             nick = user
             try:
@@ -432,6 +420,11 @@ class LastFM(callbacks.Plugin):
         else:
             nick = msg.nick
             user = self.db.get(msg.prefix)
+        return nick, user
+
+
+    def get_topartists(self, irc, msg, user, duration):
+        apiKey = self.check_apiKey(irc)
 
         if duration in ['overall', '7day', '1month', '3month', '6month', '12month']:
             duration = duration
@@ -446,12 +439,7 @@ class LastFM(callbacks.Plugin):
                 '12month' : 'for the last year'}
 
         # Get library information for user
-        #artists = [[],[]]
-        artists = []
-        artistsplays = []
-        artistcount = 0
         limit = 10 # specify artists to return per page (api supports max of 1000)
-        outstr = "%s's top artists %s are:" % (nick, duration_dict[duration])
 
         # Get list of artists for each library
 
@@ -463,17 +451,68 @@ class LastFM(callbacks.Plugin):
             irc.error("Unknown LastFM user '%s'." % user, Raise=True)
         libraryList = json.loads(f)
 
-
+        artists = []
         for artist in libraryList["artists"]["artist"]:
-            #artists.append(artist["name"])
-            #artistsplays.append(artist["playcount"])
-            outstr = outstr + (" %s [%s]," % (ircutils.bold(artist["name"]), artist["playcount"]))
+            artists.append({'name': artist['name'], 'playcount' : artist['playcount']})
+
+        return artists, duration, duration_dict
+
+
+    @wrap([optional("something"), optional("something")])
+    def topartists(self, irc, msg, args, user, duration):
+        """[<user>] [<duration>]
+
+        Reports the top 10 artists for the user. Duration: overall | 7day | 1month | 3month | 6month | 12month (default: 6 months)
+        """
+        #irc.error("This command is not ready yet. Stay tuned!", Raise=True)
+
+        nick, user = self.check_user(msg, user, irc)
+
+        artists, duration, duration_dict = self.get_topartists(irc, msg, user, duration)
+        outstr = "%s's top artists %s are:" % (nick, duration_dict[duration])
+
+        for artist in artists:
+            outstr = outstr + (" %s [%s]," % (ircutils.bold(artist['name']), artist['playcount']))
         outstr = outstr[:-1]
 
-
-        #irc.reply("%s and %s have %d artists in common, out of %s artists" % (nick1,nick2,commonArtists,totalArtists))
         irc.reply(outstr)
-    # topartists = wrap(topartists, ['int', many('anything')])
+
+
+    @wrap([optional("something"), optional("something")])
+    def toptags(self, irc, msg, args, user, duration):
+        """[<user>] [<duration>]
+
+        Reports the top 10 tags for the user.
+        Duration: overall | 7day | 1month | 3month | 6month | 12month (default: 6 months)
+        """
+
+        nick, user = self.check_user(msg, user, irc)
+
+        # Get topartists and then get their tags
+        artists, _, _ = self.get_topartists(irc, msg, user, duration)
+        tags = []
+        for artist in artists:
+            try:
+                tags += self.get_artist_tags(artist['name'], irc)
+            except:
+                pass
+
+        if not tags:
+            irc.reply('No top tags for {}'.format(nick))
+            return
+
+        # Count each tag's occurence
+        tags = [tag.lower() for tag in tags]
+        counts = [[tag, tags.count(tag)] for tag in set(tags)]
+        counts = sorted(counts, key=lambda x: -x[1])
+
+        # And build the string
+        outstr = "{nick}'s top tags are:".format(nick=nick)
+        for tag, count in counts[:10]:
+            outstr += ' {tag} [{count}],'.format(tag=tag.title(), count=count)
+        outstr = outstr[:-1]
+
+        irc.reply(outstr)
 
 
 filename = conf.supybot.directories.data.dirize("LastFM.db")

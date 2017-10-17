@@ -471,6 +471,43 @@ class LastFM(callbacks.Plugin):
 
         irc.reply(outstr)
 
+    @wrap([optional("something"), optional("something")])
+    def toptags(self, irc, msg, args, user, duration):
+        """[<user>] [<duration>]
+
+        Reports the top 10 tags for the user. Duration: overall | 7day | 1month | 3month | 6month | 12month (default: 6 months)
+        """
+
+        nick, user = self.get_user(msg, user, irc)
+        # Get topartists and then get their tags
+        artists, duration, duration_dict = self.get_topartists(irc, msg, user, duration)
+        tags = []
+        for artist in artists:
+            try:
+                tags += self.get_artist_tags(artist['name'], irc)
+            except:
+                pass
+
+        if not tags:
+            irc.reply('No top tags for {}'.format(nick))
+            return
+
+        # Count each tag's occurence
+        tags = [tag.lower() for tag in tags]
+        try:
+            tags.remove('seen live') # remove ce tag de merde
+        except:
+            pass
+        counts = [[tag, tags.count(tag)] for tag in set(tags)]
+        counts = sorted(counts, key=lambda x: -x[1])
+
+        # And build the string
+        outstr = "{nick}'s top tags {duration} are:".format(nick=nick, duration=duration_dict[duration])
+        for tag, count in counts[:10]:
+            outstr += ' {tag} [{count}],'.format(tag=tag.title(), count=count)
+        outstr = outstr[:-1]
+
+        irc.reply(outstr)
 
 filename = conf.supybot.directories.data.dirize("LastFM.db")
 

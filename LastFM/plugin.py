@@ -182,6 +182,40 @@ class LastFM(callbacks.Plugin):
 
         return tags
 
+    def get_topartists(self, irc, msg, user, duration):
+        apiKey = self.get_apiKey(irc)
+
+        if duration in ['overall', '7day', '1month', '3month', '6month', '12month']:
+            duration = duration
+        else:
+            duration = "6month"
+        duration_dict = {
+                'overall' : 'since forever',
+                '7day'    : 'for the last week',
+                '1month'  : 'for the last month',
+                '3month'  : 'for the last 3 months',
+                '6month'  : 'for the last 6 months',
+                '12month' : 'for the last year'}
+
+        # Get library information for user
+        limit = 10 # specify artists to return per page (api supports max of 1000)
+
+        # Get list of artists for each library
+
+        url = "%sapi_key=%s&method=library.getArtists&user=%s&limit=%d&period=%s&format=json" % (self.APIURL, apiKey, user, limit, duration)
+        self.log.debug("LastFM.library: url %s", url)
+        try:
+            f = utils.web.getUrl(url).decode("utf-8")
+        except utils.web.Error:
+            irc.error("Unknown LastFM user '%s'." % user, Raise=True)
+        libraryList = json.loads(f)
+
+        artists = []
+        for artist in libraryList["artists"]["artist"]:
+            artists.append({'name': artist['name'], 'playcount' : artist['playcount']})
+
+        return artists, duration, duration_dict
+
     @wrap([optional("something")])
     def np(self, irc, msg, args, user):
         """[<user>]
@@ -427,48 +461,15 @@ class LastFM(callbacks.Plugin):
         """
         #irc.error("This command is not ready yet. Stay tuned!", Raise=True)
         nick, user = self.get_user(msg, user, irc)
-        apiKey = self.get_apiKey(irc)
-        if duration in ['overall', '7day', '1month', '3month', '6month', '12month']:
-            duration = duration
-        else:
-            duration = "6month"
-        duration_dict = {
-                'overall' : 'since forever',
-                '7day'    : 'for the last week',
-                '1month'  : 'for the last month',
-                '3month'  : 'for the last 3 months',
-                '6month'  : 'for the last 6 months',
-                '12month' : 'for the last year'}
-
-        # Get library information for user
-        #artists = [[],[]]
-        artists = []
-        artistsplays = []
-        artistcount = 0
-        limit = 10 # specify artists to return per page (api supports max of 1000)
+        artists, duration, duration_dict = self.get_topartists(irc, msg, user, duration)
         outstr = "%s's top artists %s are:" % (nick, duration_dict[duration])
 
-        # Get list of artists for each library
+        for artist in artists:
+            outstr = outstr + (" %s [%s]," % (ircutils.bold(artist['name']), artist['playcount']))
 
-        url = "%sapi_key=%s&method=library.getArtists&user=%s&limit=%d&period=%s&format=json" % (self.APIURL, apiKey, user, limit, duration)
-        self.log.debug("LastFM.library: url %s", url)
-        try:
-            f = utils.web.getUrl(url).decode("utf-8")
-        except utils.web.Error:
-            irc.error("Unknown LastFM user '%s'." % user, Raise=True)
-        libraryList = json.loads(f)
-
-
-        for artist in libraryList["artists"]["artist"]:
-            #artists.append(artist["name"])
-            #artistsplays.append(artist["playcount"])
-            outstr = outstr + (" %s [%s]," % (ircutils.bold(artist["name"]), artist["playcount"]))
         outstr = outstr[:-1]
 
-
-        #irc.reply("%s and %s have %d artists in common, out of %s artists" % (nick1,nick2,commonArtists,totalArtists))
         irc.reply(outstr)
-    # topartists = wrap(topartists, ['int', many('anything')])
 
 
 filename = conf.supybot.directories.data.dirize("LastFM.db")

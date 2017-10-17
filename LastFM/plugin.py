@@ -136,6 +136,27 @@ class LastFM(callbacks.Plugin):
 
         return apiKey
 
+    def get_user(self, msg, user, irc):
+        if user != None:
+            nick = user
+            try:
+                # To find last.fm id in plugin database
+                hostmask = irc.state.nickToHostmask(user)
+                userx = self.db.get(hostmask)
+                if userx != None:
+                    user = userx
+                else:
+                    irc.reply("%s is not registered with the bot" % user)
+                    irc.error("Bot only supports top artists for registered users", Raise=True)
+
+            except:
+                irc.reply("%s is not registered with the bot" % user)
+                irc.error("Bot only supports top artist for registered users", Raise=True)
+        else:
+            nick = msg.nick
+            user = self.db.get(msg.prefix)
+        return nick, user
+
     def get_artist_tags(self, artist, irc):
         """
        Retourne les tags pour un artiste donné
@@ -405,27 +426,8 @@ class LastFM(callbacks.Plugin):
         Reports the top 10 artists for the user. Duration: overall | 7day | 1month | 3month | 6month | 12month (default: 6 months)
         """
         #irc.error("This command is not ready yet. Stay tuned!", Raise=True)
-
+        nick, user = self.get_user(msg, user, irc)
         apiKey = self.get_apiKey(irc)
-        if user != None:
-            nick = user
-            try:
-                # To find last.fm id in plugin database
-                hostmask = irc.state.nickToHostmask(user)
-                userx = self.db.get(hostmask)
-                if userx != None:
-                    user = userx
-                else:
-                    irc.reply("%s is not registered with the bot" % user)
-                    irc.error("Bot only supports top artists for registered users", Raise=True)
-
-            except:
-                irc.reply("%s is not registered with the bot" % user)
-                irc.error("Bot only supports top artist for registered users", Raise=True)
-        else:
-            nick = msg.nick
-            user = self.db.get(msg.prefix)
-
         if duration in ['overall', '7day', '1month', '3month', '6month', '12month']:
             duration = duration
         else:

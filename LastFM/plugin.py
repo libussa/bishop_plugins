@@ -126,6 +126,16 @@ class LastFM(callbacks.Plugin):
         self.db.flush()
         self.__parent.die()
 
+    def get_apiKey(self, irc):
+        apiKey = self.registryValue("apiKey")
+        if not apiKey:
+            irc.error("The API Key is not set. Please set it via "
+                      "'config plugins.lastfm.apikey' and reload the plugin. "
+                      "You can sign up for an API Key using "
+                      "http://www.last.fm/api/account/create", Raise=True)
+
+        return apiKey
+
     def get_artist_tags(self, artist, irc):
         """
        Retourne les tags pour un artiste donné
@@ -133,7 +143,7 @@ class LastFM(callbacks.Plugin):
        :param irc: irc
        :return: liste de tags
        """
-        apiKey = self.registryValue("apiKey")
+        apiKey = self.get_apiKey(irc)
         url = "%sapi_key=%s&method=artist.getinfo&artist=%s&format=json" % (self.APIURL, apiKey, artist)
         tags = []
         try:
@@ -159,12 +169,7 @@ class LastFM(callbacks.Plugin):
         is not given, defaults to the LastFM user configured for your
         current nick.
         """
-        apiKey = self.registryValue("apiKey")
-        if not apiKey:
-            irc.error("The API Key is not set. Please set it via "
-                      "'config plugins.lastfm.apikey' and reload the plugin. "
-                      "You can sign up for an API Key using "
-                      "http://www.last.fm/api/account/create", Raise=True)
+        apiKey = self.get_apiKey(irc)
         user = (user or self.db.get(msg.prefix))
         if not user:
             irc.error("use .set <LastFM username> first.", Raise=True)
@@ -276,13 +281,7 @@ class LastFM(callbacks.Plugin):
         is not given, defaults to the LastFM user configured for your
         current nick.
         """
-        apiKey = self.registryValue("apiKey")
-        if not apiKey:
-            irc.error("The API Key is not set. Please set it via "
-                      "'config plugins.lastfm.apikey' and reload the plugin. "
-                      "You can sign up for an API Key using "
-                      "http://www.last.fm/api/account/create", Raise=True)
-
+        apiKey = self.get_apiKey(irc)
         channel = msg.args[0]
         L = list(irc.state.channels[channel].users)
 
@@ -407,13 +406,7 @@ class LastFM(callbacks.Plugin):
         """
         #irc.error("This command is not ready yet. Stay tuned!", Raise=True)
 
-        apiKey = self.registryValue("apiKey")
-        if not apiKey:
-            irc.error("The API Key is not set. Please set it via "
-                      "'config plugins.lastfm.apikey' and reload the plugin. "
-                      "You can sign up for an API Key using "
-                      "http://www.last.fm/api/account/create", Raise=True)
-
+        apiKey = self.get_apiKey(irc)
         if user != None:
             nick = user
             try:

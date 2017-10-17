@@ -126,6 +126,7 @@ class LastFM(callbacks.Plugin):
         self.db.flush()
         self.__parent.die()
 
+
     def get_apiKey(self, irc):
         apiKey = self.registryValue("apiKey")
         if not apiKey:
@@ -135,6 +136,7 @@ class LastFM(callbacks.Plugin):
                       "http://www.last.fm/api/account/create", Raise=True)
 
         return apiKey
+
 
     def get_user(self, msg, user, irc):
         if user != None:
@@ -157,6 +159,7 @@ class LastFM(callbacks.Plugin):
             user = self.db.get(msg.prefix)
         return nick, user
 
+
     def get_artist_tags(self, artist, irc):
         """
        Retourne les tags pour un artiste donné
@@ -167,20 +170,21 @@ class LastFM(callbacks.Plugin):
         apiKey = self.get_apiKey(irc)
         url = "%sapi_key=%s&method=artist.getinfo&artist=%s&format=json" % (self.APIURL, apiKey, artist)
         tags = []
+
         try:
             f = utils.web.getUrl(url).decode("utf-8")
             data = json.loads(f)['artist']['tags']['tag']
             for tag in data:
                 tags.append(tag['name'])
         except utils.web.Error:
-            # irc.error("Unknown artist %s." % artist, Raise=True)
             return None
         except KeyError:
-            # irc.error("Unknown artist %s." % artist, Raise=True)
             return None
+
         self.log.debug("LastFM.artist.getinfos: url %s", url)
 
         return tags
+
 
     def get_topartists(self, irc, msg, user, duration):
         apiKey = self.get_apiKey(irc)
@@ -189,6 +193,7 @@ class LastFM(callbacks.Plugin):
             duration = duration
         else:
             duration = "6month"
+
         duration_dict = {
                 'overall' : 'since forever',
                 '7day'    : 'for the last week',
@@ -199,22 +204,22 @@ class LastFM(callbacks.Plugin):
 
         # Get library information for user
         limit = 10 # specify artists to return per page (api supports max of 1000)
-
         # Get list of artists for each library
-
         url = "%sapi_key=%s&method=library.getArtists&user=%s&limit=%d&period=%s&format=json" % (self.APIURL, apiKey, user, limit, duration)
         self.log.debug("LastFM.library: url %s", url)
+
         try:
             f = utils.web.getUrl(url).decode("utf-8")
         except utils.web.Error:
             irc.error("Unknown LastFM user '%s'." % user, Raise=True)
         libraryList = json.loads(f)
-
         artists = []
+
         for artist in libraryList["artists"]["artist"]:
             artists.append({'name': artist['name'], 'playcount' : artist['playcount']})
 
         return artists, duration, duration_dict
+
 
     @wrap([optional("something")])
     def np(self, irc, msg, args, user):
@@ -291,14 +296,11 @@ class LastFM(callbacks.Plugin):
             tag_list = ', '.join(tags)
         except TypeError:
             tag_list = ''
-        # if album:
-            # album = ircutils.bold("[%s]" % album)
 
         try:
             time = int(trackdata["date"]["uts"])  # Time of last listen
             # Format this using the preferred time format.
             tformat = conf.supybot.reply.format.time()
-            #time = "at %s" % datetime.fromtimestamp(time).strftime(tformat)
             time = "%s" % humanize.naturaltime(datetime.now() - datetime.fromtimestamp(time))
         except KeyError:  # Nothing given by the API?
             time = ""
@@ -327,7 +329,7 @@ class LastFM(callbacks.Plugin):
 
         irc.reply(utils.str.normalizeWhitespace(s))
 
-#    @wrap([optional("something")])
+
     @wrap
     def wp(self, irc, msg, args):
         """[<user>]
@@ -342,10 +344,7 @@ class LastFM(callbacks.Plugin):
 
         for nick in L:
             hostmask = irc.state.nickToHostmask(nick)
-            #irc.reply(hostmask, prefixNick=False)
-
             user = self.db.get(hostmask)
-
             if user:
             # see http://www.lastfm.de/api/show/user.getrecenttracks
                 url = "%sapi_key=%s&method=user.getrecenttracks&user=%s&format=json" % (self.APIURL, apiKey, user)
@@ -381,20 +380,14 @@ class LastFM(callbacks.Plugin):
                     # Format this using the preferred time format.
                     tformat = conf.supybot.reply.format.time()
                     time = "(%s)" % humanize.naturaltime(datetime.now() - datetime.fromtimestamp(time))
-                    # time = ""
                 except KeyError:  # Nothing given by the API?
                     time = ""
 
                     public_url = ''
                     nickquiet = nick[:-1] + u"\u2063" + nick[-1:]
-                # s = '%14s: %s by %s %s %s. %s' % (nickquiet, ircutils.bold(track),
-                    # ircutils.bold(artist), album, time, public_url)
 
                     s = '%-14s %-20s %s' % (nickquiet, artist, track)
                     irc.reply(s,prefixNick=False)
-                # irc.reply("nothing playing")
-
-                # irc.reply(utils.str.normalizeWhitespace(s),prefixNick=False)
 
 
     @wrap(["something"])
@@ -407,51 +400,6 @@ class LastFM(callbacks.Plugin):
         self.db.set(msg.prefix, newId)
         irc.reply("you are now http://www.last.fm/user/%s" % newId)
 
-    # @wrap([optional("something")])
-    # def profile(self, irc, msg, args, user):
-        # """[<user>]
-
-        # Prints the profile info for the specified LastFM user. If <user>
-        # is not given, defaults to the LastFM user configured for your
-        # current nick.
-        # """
-        # apiKey = self.registryValue("apiKey")
-        # if not apiKey:
-            # irc.error("The API Key is not set. Please set it via "
-                      # "'config plugins.lastfm.apikey' and reload the plugin. "
-                      # "You can sign up for an API Key using "
-                      # "http://www.last.fm/api/account/create", Raise=True)
-        # user = (user or self.db.get(msg.prefix) or msg.nick)
-
-        # url = "%sapi_key=%s&method=user.getInfo&user=%s&format=json" % (self.APIURL, apiKey, user)
-        # self.log.debug("LastFM.profile: url %s", url)
-        # try:
-            # f = utils.web.getUrl(url).decode("utf-8")
-        # except utils.web.Error:
-            # irc.error("Unknown user '%s'." % user, Raise=True)
-
-        # data = json.loads(f)
-        # keys = ("realname", "age", "gender", "country", "playcount")
-        # profile = {"id": ircutils.bold(user)}
-        # for tag in keys:
-            # try:
-                # s = data["user"][tag].strip() or "N/A"
-            # except KeyError: # empty field
-                # s = "N/A"
-            # finally:
-                # profile[tag] = ircutils.bold(s)
-        # try:
-            # LastFM sends the user registration time as a unix timestamp;
-            # Format it using the preferred time format.
-            # time = int(data["user"]["registered"]["unixtime"])
-            # tformat = conf.supybot.reply.format.time()
-            # s = datetime.fromtimestamp(time).strftime(tformat)
-        # except KeyError:
-            # s = "N/A"
-        # finally:
-            # profile["registered"] = ircutils.bold(s)
-        # irc.reply("%(id)s (realname: %(realname)s) registered on %(registered)s; age: %(age)s / %(gender)s; "
-                  # "Country: %(country)s; Tracks played: %(playcount)s" % profile)
 
     @wrap([optional("something"), optional("something")])
     def topartists(self, irc, msg, args, user, duration):
@@ -470,6 +418,7 @@ class LastFM(callbacks.Plugin):
         outstr = outstr[:-1]
 
         irc.reply(outstr)
+
 
     @wrap([optional("something"), optional("something")])
     def toptags(self, irc, msg, args, user, duration):

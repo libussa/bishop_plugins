@@ -381,7 +381,7 @@ class LastFM(callbacks.Plugin):
                 except KeyError:
                     # Nothing given by the API = now playing,
                     # this is what we want
-                    nickquiet = nick[:-1] + u"\u2063" + nick[-1:]
+                    nickquiet = nick[0] + u"\u2063" + nick[1:]
 
                     if len(nickquiet) > self.user_max_length:
                         nickquiet = nickquiet[:self.user_max_length-1] + '…'

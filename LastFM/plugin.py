@@ -336,12 +336,8 @@ class LastFM(callbacks.Plugin):
 
     @wrap
     def wp(self, irc, msg, args):
-        """
-        Announces the track currently being played by users on msg.args[0] channel.
-        :param irc:
-        :param msg:
-        :param args:
-        :return:
+        """[]
+        Announces the track currently being played by current channel users.
         """
         apiKey = self.get_apiKey(irc)
         channel = msg.args[0]

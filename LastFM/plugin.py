@@ -120,6 +120,10 @@ class LastFM(callbacks.Plugin):
         self.youtube = build("youtube", "v3",
           developerKey="AIzaSyDlRCditJ0QvbJLajRPMW3Y-r32CdOzVp4")
 
+        # max length of fields for wp
+        self.user_max_length = 14
+        self.artist_max_length = 20
+
 
     def die(self):
         world.flushers.remove(self.db.flush)
@@ -332,11 +336,12 @@ class LastFM(callbacks.Plugin):
 
     @wrap
     def wp(self, irc, msg, args):
-        """[<user>]
-
-        Announces the track currently being played by <user>. If <user>
-        is not given, defaults to the LastFM user configured for your
-        current nick.
+        """
+        Announces the track currently being played by users on msg.args[0] channel.
+        :param irc:
+        :param msg:
+        :param args:
+        :return:
         """
         apiKey = self.get_apiKey(irc)
         channel = msg.args[0]
@@ -377,16 +382,17 @@ class LastFM(callbacks.Plugin):
 
                 try:
                     time = int(trackdata["date"]["uts"])  # Time of last listen
-                    # Format this using the preferred time format.
-                    tformat = conf.supybot.reply.format.time()
-                    time = "(%s)" % humanize.naturaltime(datetime.now() - datetime.fromtimestamp(time))
-                except KeyError:  # Nothing given by the API?
-                    time = ""
-
-                    public_url = ''
+                except KeyError:
+                    # Nothing given by the API = now playing,
+                    # this is what we want
                     nickquiet = nick[:-1] + u"\u2063" + nick[-1:]
 
-                    s = '%-14s %-20s %s' % (nickquiet, artist, track)
+                    if len(nickquiet) > self.user_max_length:
+                        nickquiet = nickquiet[:self.user_max_length-1] + '…'
+                    if len(artist) > self.artist_max_length:
+                        artist = artist[:self.artist_max_length-1] + '…'
+
+                    s = '%-{ul}s %-{al}s %s'.format(ul=self.user_max_length, al=self.artist_max_length) % (nickquiet, artist, track)
                     irc.reply(s,prefixNick=False)
 
 

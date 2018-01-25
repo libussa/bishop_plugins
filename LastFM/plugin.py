@@ -121,7 +121,7 @@ class LastFM(callbacks.Plugin):
           developerKey="AIzaSyDlRCditJ0QvbJLajRPMW3Y-r32CdOzVp4")
 
         # max length of fields for wp
-        self.user_max_length = 14
+        self.user_max_length = 16
         self.artist_max_length = 20
 
 

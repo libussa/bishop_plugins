@@ -207,7 +207,7 @@ class SpiffyTitles(callbacks.Plugin):
 
         elif args['action'] in {'torrentgroup', 'torrent'}:
             if r['group']['categoryName'] == 'Music':
-                title = "%s by %s" % (r['group']['name'], self.gazelle_nice_artists(r['group']))
+                title = "%s \u2014 %s \u2014 %s \u2014 %s" % (self.gazelle_nice_artists(r['group']), r['group']['name'], r['group']['year'], ', '.join(r['group']['tags'][:5]).replace('.',' '))
             else:
                 title = r['group']['name']
 

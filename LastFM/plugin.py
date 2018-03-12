@@ -352,13 +352,15 @@ class LastFM(callbacks.Plugin):
                 try:
                     f = utils.web.getUrl(url).decode("utf-8")
                 except utils.web.Error:
-                    irc.error("Unknown user %s." % user, Raise=True)
+                    continue
+#                    irc.error("Unknown user %s." % user, Raise=True)
                 self.log.debug("LastFM.nowPlaying: url %s", url)
 
                 try:
                     data = json.loads(f)["recenttracks"]
                 except KeyError:
-                    irc.error("Unknown user %s." % user, Raise=True)
+                    continue
+#                    irc.error("Unknown user %s." % user, Raise=True)
 
                 user = data["@attr"]["user"]
                 tracks = data["track"]

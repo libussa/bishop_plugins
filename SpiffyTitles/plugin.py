@@ -31,6 +31,7 @@ import supybot.log as log
 import pytz
 from . import gazapi
 from html import unescape
+import os
 
 
 try:
@@ -95,11 +96,11 @@ class SpiffyTitles(callbacks.Plugin):
 
 
     def add_gazelle_handlers(self):
-        self.api_red = gazapi.GazAPI('/home/bishop/bishop_plugins/SpiffyTitles/gazelle.conf', 'redacted')
+        self.api_red = gazapi.GazAPI(os.path.join(os.path.abspath(os.path.dirname(__file__)),'gazelle.conf'), 'redacted')
         self.handlers["redacted.ch"] = self.handler_redacted
         self.handlers["passtheheadphones.me"] = self.handler_redacted
 
-        self.api_apl = gazapi.GazAPI('/home/bishop/bishop_plugins/SpiffyTitles/gazelle.conf', 'apl')
+        self.api_apl = gazapi.GazAPI(os.path.join(os.path.abspath(os.path.dirname(__file__)),'gazelle.conf'), 'apl')
         self.handlers["apollo.rip"] = self.handler_apl
 
 

@@ -1,2 +1,2 @@
 humanize
-apiclient
+google-api-python-client

@@ -267,14 +267,8 @@ class LastFM(callbacks.Plugin):
         album = trackdata["album"]["#text"].strip()
         tags = self.get_artist_tags(artist, irc)
 
-        mbid = trackdata["mbid"].strip()
-
-        if mbid:
-            url_track = "%sapi_key=%s&method=track.getInfo&user=%s&mbid=%s&format=json" \
-                    % (self.APIURL, apiKey, user, mbid)
-        else:
-            url_track = "%sapi_key=%s&method=track.getInfo&user=%s&artist=%s&track=%s&format=json" \
-                    % (self.APIURL, apiKey, user, artist, track)
+        url_track = "%sapi_key=%s&method=track.getInfo&user=%s&artist=%s&track=%s&format=json" \
+                % (self.APIURL, apiKey, user, parse.quote(artist), parse.quote(track))
 
         try:
             ans = utils.web.getUrl(url_track).decode("utf-8")

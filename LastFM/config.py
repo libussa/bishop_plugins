@@ -44,6 +44,8 @@ def configure(advanced):
 LastFM = conf.registerPlugin('LastFM')
 conf.registerGlobalValue(LastFM, 'apiKey',
      registry.String('', """Sets the API key for this plugin: http://www.last.fm/api/account/create""", private=True))
+conf.registerGlobalValue(LastFM, 'youtubeApiKey',
+     registry.String('', """Sets the Youtube API key""", private=True))
 conf.registerChannelValue(LastFM, "fetchYouTubeLink",
     registry.Boolean(False, """Determines whether the bot will try to
         fetch a YouTube link for the track given in 'np'. This is an

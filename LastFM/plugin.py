@@ -117,8 +117,10 @@ class LastFM(callbacks.Plugin):
 
         # 2.0 API (see http://www.lastfm.de/api/intro)
         self.APIURL = "http://ws.audioscrobbler.com/2.0/?"
+
+        youtubeApiKey = self.get_youtubeApiKey(irc)
         self.youtube = build("youtube", "v3",
-          developerKey="AIzaSyDlRCditJ0QvbJLajRPMW3Y-r32CdOzVp4")
+          developerKey=youtubeApiKey)
 
         # max length of fields for wp
         self.user_max_length = 16
@@ -140,6 +142,15 @@ class LastFM(callbacks.Plugin):
                       "http://www.last.fm/api/account/create", Raise=True)
 
         return apiKey
+
+
+    def get_youtubeApiKey(self, irc):
+        youtubeApiKey = self.registryValue("youtubeApiKey")
+        if not youtubeApiKey:
+            irc.error("The Youtube API Key is not set. Please set it via "
+                      "'config plugins.lastfm.youtubeApiKey' and reload the plugin. ", Raise=True)
+
+        return youtubeApiKey
 
 
     def get_user(self, msg, user, irc):

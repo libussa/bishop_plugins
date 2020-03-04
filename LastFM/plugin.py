@@ -336,6 +336,7 @@ class LastFM(callbacks.Plugin):
         apiKey = self.get_apiKey(irc)
         channel = msg.args[0]
         L = list(irc.state.channels[channel].users)
+        wp_data = []
 
         for nick in L:
             hostmask = irc.state.nickToHostmask(nick)
@@ -378,14 +379,14 @@ class LastFM(callbacks.Plugin):
                     # Nothing given by the API = now playing,
                     # this is what we want
                     nickquiet = nick[0] + u"\u2063" + nick[1:]
+                    wp_data.append({'nick': nickquiet, 'artist': artist, 'track': track})
 
-                    if len(nickquiet) > self.user_max_length:
-                        nickquiet = nickquiet[:self.user_max_length-1] + '…'
-                    if len(artist) > self.artist_max_length:
-                        artist = artist[:self.artist_max_length-1] + '…'
+        user_max_length = min(max(len(item['nick']) for item in wp_data), 25)
+        artist_max_length = min(max(len(item['artist']) for item in wp_data), 40)
 
-                    s = '%-{ul}s %-{al}s %s'.format(ul=self.user_max_length, al=self.artist_max_length) % (nickquiet, artist, track)
-                    irc.reply(s,prefixNick=False)
+        for wp_user in wp_data:
+            s = f"{wp_user['nick'].ljust(user_max_length)[:user_max_length]}  {wp_user['artist'].ljust(artist_max_length)[:artist_max_length]}  {wp_user['track']}"
+            irc.reply(s, prefixNick=False)
 
 
     @wrap(["something"])

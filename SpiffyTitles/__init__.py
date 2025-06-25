@@ -28,7 +28,7 @@ __url__ = ''
 
 from . import config
 from . import plugin
-from imp import reload
+from importlib import reload
 # In case we're being reloaded.
 reload(plugin)
 # Add more reloads here if you add third-party modules and want them to be

@@ -1,9 +1,11 @@
 [redacted]
 username = libussa
 password = SeCrEt
+api_token = bla
 url = https://redacted.ch/
 
 [apl]
 username = libussa
 password = SeCrEt
+api_token = bla
 url = https://apollo.rip

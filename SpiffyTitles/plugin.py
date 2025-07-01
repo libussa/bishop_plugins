@@ -20,7 +20,7 @@ except ImportError:
 from bs4 import BeautifulSoup
 import random
 import json
-import cgi
+from urllib.parse import urlparse, parse_qs, parse_qsl
 import datetime
 from jinja2 import Template
 from datetime import timedelta
@@ -703,31 +703,35 @@ class SpiffyTitles(callbacks.Plugin):
             except re.Error:
                 log.error("SpiffyTitles: invalid regular expression: %s" % (pattern))
 
-    def get_video_id_from_url(self, url, info):
+    def get_video_id_from_url(url: str) -> str | None:
         """
-        Get YouTube video ID from URL
+        Extract the YouTube video ID from *url*.
+
+        Returns the 11-character video ID, or None if it can’t be found.
         """
         try:
-            path = info.path
-            domain = info.netloc
-            video_id = ""
+            info = urlparse(url)
+            domain = info.netloc.lower()
+            video_id: str | None = None
 
+            # 1)  youtu.be/<id>
             if domain == "youtu.be":
-                video_id = path.split("/")[1]
-            else:
-                parsed = cgi.parse_qsl(info.query)
-                params = dict(parsed)
+                #  '/abc123' → 'abc123'
+                video_id = info.path.lstrip("/")
 
-                if "v" in params:
-                    video_id = params["v"]
+            # 2)  www.youtube.com/watch?v=<id>&…
+            else:
+                query_pairs = parse_qs(info.query)
+                video_id = query_pairs.get("v", [None])[0]
 
             if video_id:
                 return video_id
-            else:
-                log.error("SpiffyTitles: error getting video id from %s" % (url))
 
-        except IndexError as e:
-            log.error("SpiffyTitles: error getting video id from %s (%s)" % (url, str(e)))
+            log.error("SpiffyTitles: couldn’t get video id from %s", url)
+        except Exception as exc:
+            log.error("SpiffyTitles: error getting video id from %s (%s)", url, exc)
+
+        return None
 
     def handler_youtube(self, url, domain, channel):
         """

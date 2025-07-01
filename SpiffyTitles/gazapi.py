@@ -69,15 +69,10 @@ class GazAPI:
 
         # Preferred auth method – API token.
         self.api_token: Optional[str] = section.get("api_token")
-
-        # Legacy creds (only used when no token present)
-        self.username: Optional[str] = section.get("username")
-        self.password: Optional[str] = section.get("password")
+        if not self.api_token:
+            raise LoginException(f"api_token missing from '{site}' section")
 
         self.session: Optional[requests.Session] = None
-        self.user_id: Optional[int] = None
-        self.authkey: Optional[str] = None  # Only relevant after form‑login
-
         self.connect()
 
     # ---------------------------------------------------------------------
@@ -95,37 +90,6 @@ class GazAPI:
         self.session = requests.Session()
         self._set_default_headers()
 
-        if self.api_token:
-            # Token auth needs no further handshake.
-            return
-
-        # Fallback to legacy username/password login.
-        if not (self.username and self.password):
-            raise LoginException(
-                "No 'api_token' found and username/password missing"
-            )
-        self._login_with_form()
-
-    def _login_with_form(self) -> None:
-        """Perform the classic POST-login flow for sites without token."""
-        login_url = f"{self.site_url}/login.php"
-        data = {"username": self.username, "password": self.password}
-        resp = self.session.post(login_url, data=data, allow_redirects=True)
-
-        if resp.status_code != 200:
-            raise LoginException(f"HTTP {resp.status_code} during login")
-        if resp.url.rstrip("/") == login_url.rstrip("/"):
-            raise LoginException("Invalid username/password combination")
-
-        # Acquire user_id + authkey – some endpoints still want them.
-        try:
-            account_info = self.request("index")
-        except RequestException as exc:
-            raise LoginException("Login succeeded but index request failed") from exc
-
-        self.user_id = account_info.get("id")
-        self.authkey = account_info.get("authkey")
-
     # ---------------------------------------------------------------------
     # Public API
     # ---------------------------------------------------------------------
@@ -137,8 +101,6 @@ class GazAPI:
         """
         ajax_url = f"{self.site_url}/ajax.php"
         params = {"action": action, **kwargs}
-        if self.authkey:
-            params["auth"] = self.authkey
 
         response = self.session.get(
             ajax_url, params=params, allow_redirects=False, timeout=30

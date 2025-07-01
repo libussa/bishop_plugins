@@ -112,7 +112,6 @@ class SpiffyTitles(callbacks.Plugin):
         args = self.gazelle_parse_url(url)
 
         if args:
-            self.api_red.connect()
             result = self.gazelle_info(args, self.api_red)
             return "^ " + unescape(result)
 
@@ -126,7 +125,6 @@ class SpiffyTitles(callbacks.Plugin):
         args = self.gazelle_parse_url(url)
 
         if args:
-            self.api_apl.connect()
             result = self.gazelle_info(args, self.api_apl)
             return "^ " + unescape(result)
 

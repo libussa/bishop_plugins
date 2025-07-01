@@ -97,11 +97,10 @@ class SpiffyTitles(callbacks.Plugin):
 
     def add_gazelle_handlers(self):
         self.api_red = gazapi.GazAPI(os.path.join(os.path.abspath(os.path.dirname(__file__)),'gazelle.conf'), 'redacted')
-        self.handlers["redacted.ch"] = self.handler_redacted
-        self.handlers["passtheheadphones.me"] = self.handler_redacted
+        self.handlers["redacted.sh"] = self.handler_redacted
 
-        self.api_apl = gazapi.GazAPI(os.path.join(os.path.abspath(os.path.dirname(__file__)),'gazelle.conf'), 'apl')
-        self.handlers["apollo.rip"] = self.handler_apl
+        self.api_apl = gazapi.GazAPI(os.path.join(os.path.abspath(os.path.dirname(__file__)),'gazelle.conf'), 'orpheus')
+        self.handlers["orpheus.network"] = self.handler_apl
 
 
     def handler_redacted(self, url, info, channel):

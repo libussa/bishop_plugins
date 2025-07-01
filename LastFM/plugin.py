@@ -305,23 +305,27 @@ class LastFM(callbacks.Plugin):
             time = ""
 
         public_url = ''
-        # Fetch a youtube link with google api
         if self.registryValue("fetchYouTubeLink"):
+            try:
+                search_response = self.youtube.search().list(
+                    q=f"{artist} {track}",
+                    part="id",
+                    maxResults=5,          # grab a handful, we’ll pick the first video
+                    type="video"           # still ask for videos only
+                ).execute()
+            except HttpError as e:
+                log.warning("YouTube API error %s: %s", e.resp.status, e.content)
+                search_response = {}
 
-          try:
-            search_response = self.youtube.search().list(
-                                    q="%s %s" % (artist, track),
-                                    part="id",
-                                    maxResults=1,
-                                    type="video"
-                                ).execute()
+            video_id = None
+            for item in search_response.get("items", []):
+                id_info = item.get("id", {})
+                if id_info.get("kind") == "youtube#video" and "videoId" in id_info:
+                    video_id = id_info["videoId"]
+                    break
 
-            videoID = search_response["items"][0]["id"]["videoId"]
-            public_url = "https://youtu.be/" + videoID
-          except HttpError as e:
-            print("An HTTP error %d occurred:\n%s" % (e.resp.status, e.content))
-          except IndexError:
-            print("No video found")
+            if video_id:
+                public_url = f"https://youtu.be/{video_id}"
 
         response = [artist, track, tag_list, public_url, time, playcount]
         s = ' \u2014 '.join(filter(None, response))

@@ -118,7 +118,7 @@ class LastFM(callbacks.Plugin):
         # 2.0 API (see http://www.lastfm.de/api/intro)
         self.APIURL = "http://ws.audioscrobbler.com/2.0/?"
 
-        youtubeApiKey = self.get_youtubeApiKey(irc)
+        youtubeApiKey = self.registryValue("youtubeApiKey")
         self.youtube = build("youtube", "v3", developerKey=youtubeApiKey)
 
         # max length of fields for wp
@@ -196,7 +196,8 @@ class LastFM(callbacks.Plugin):
         if duration in ['overall', '7day', '1month', '3month', '6month', '12month']:
             duration = duration
         else:
-            duration = "6month"
+            irc.reply("Duration must be one of: overall | 7day | 1month | 3month | 6month | 12month. Using default.")
+            duration = "1month"
 
         duration_dict = {
                 'overall' : 'since forever',
@@ -209,7 +210,7 @@ class LastFM(callbacks.Plugin):
         # Get library information for user
         limit = 10 # specify artists to return per page (api supports max of 1000)
         # Get list of artists for each library
-        url = "%sapi_key=%s&method=library.getArtists&user=%s&limit=%d&period=%s&format=json" % (self.APIURL, apiKey, user, limit, duration)
+        url = "%sapi_key=%s&method=user.gettopartists&user=%s&limit=%d&period=%s&format=json" % (self.APIURL, apiKey, user, limit, duration)
         self.log.debug("LastFM.library: url %s", url)
 
         try:
@@ -219,7 +220,7 @@ class LastFM(callbacks.Plugin):
         libraryList = json.loads(f)
         artists = []
 
-        for artist in libraryList["artists"]["artist"]:
+        for artist in libraryList["topartists"]["artist"]:
             artists.append({'name': artist['name'], 'playcount' : artist['playcount']})
 
         return artists, duration, duration_dict
@@ -381,12 +382,16 @@ class LastFM(callbacks.Plugin):
                     nickquiet = nick[0] + u"\u2063" + nick[1:]
                     wp_data.append({'nick': nickquiet, 'artist': artist, 'track': track})
 
-        user_max_length = min(max(len(item['nick']) for item in wp_data), 25)
-        artist_max_length = min(max(len(item['artist']) for item in wp_data), 40)
-
-        for wp_user in wp_data:
-            s = f"{wp_user['nick'].ljust(user_max_length)[:user_max_length]}  {wp_user['artist'].ljust(artist_max_length)[:artist_max_length]}  {wp_user['track']}"
+        if not wp_data:
+            s = "No one is playing anything right now."
             irc.reply(s, prefixNick=False)
+        else:
+            user_max_length = min(max(len(item['nick']) for item in wp_data), 25)
+            artist_max_length = min(max(len(item['artist']) for item in wp_data), 40)
+            s = ""
+            for wp_user in wp_data:
+                s = f"{wp_user['nick'].ljust(user_max_length)[:user_max_length]}  {wp_user['artist'].ljust(artist_max_length)[:artist_max_length]}  {wp_user['track']}"
+                irc.reply(s, prefixNick=False)
 
 
     @wrap(["something"])
@@ -401,10 +406,10 @@ class LastFM(callbacks.Plugin):
 
 
     @wrap([optional("something"), optional("something")])
-    def topartists(self, irc, msg, args, user, duration):
-        """[<user>] [<duration>]
+    def topartists(self, irc, msg, args, duration, user):
+        """[<duration>] [<user>]
 
-        Reports the top 10 artists for the user. Duration: overall | 7day | 1month | 3month | 6month | 12month (default: 6 months)
+        Reports the top 10 artists for the current user (or the one specified). Duration: overall | 7day | 1month | 3month | 6month | 12month (default: 6 months)
         """
         #irc.error("This command is not ready yet. Stay tuned!", Raise=True)
         nick, user = self.get_user(msg, user, irc)

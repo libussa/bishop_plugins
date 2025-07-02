@@ -316,6 +316,9 @@ class LastFM(callbacks.Plugin):
             except HttpError as e:
                 log.warning("YouTube API error %s: %s", e.resp.status, e.content)
                 search_response = {}
+            except BrokenPipeError as e:
+                log.warning("YouTube API error: %s", e)
+                search_response = {}
 
             video_id = None
             for item in search_response.get("items", []):

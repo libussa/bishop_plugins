@@ -700,7 +700,7 @@ class SpiffyTitles(callbacks.Plugin):
             except re.Error:
                 log.error("SpiffyTitles: invalid regular expression: %s" % (pattern))
 
-    def get_video_id_from_url(url: str) -> str | None:
+    def get_video_id_from_url(self, url: str) -> str | None:
         """
         Extract the YouTube video ID from *url*.
 
@@ -747,7 +747,7 @@ class SpiffyTitles(callbacks.Plugin):
             return None
 
         log.debug("SpiffyTitles: calling Youtube handler for %s" % (url))
-        video_id = self.get_video_id_from_url(url, domain)
+        video_id = self.get_video_id_from_url(url)
         yt_template = Template(self.registryValue("youtubeTitleTemplate", channel=channel))
         title = ""
 

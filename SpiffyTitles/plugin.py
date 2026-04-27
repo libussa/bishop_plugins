@@ -472,50 +472,88 @@ class SpiffyTitles(callbacks.Plugin):
 
         if is_channel:
             channel_is_allowed = self.is_channel_allowed(channel)
-            url = self.get_url_from_message(message)
+            urls = self.get_urls_from_message(message)
             ignore_match = self.message_matches_ignore_pattern(message)
 
             if ignore_match:
                 log.debug("SpiffyTitles: ignoring message due to linkMessagePattern match")
                 return
 
-            if url:
+            if urls:
                 # Check if channel is allowed based on white/black list restrictions
                 if not channel_is_allowed:
-                    log.debug("SpiffyTitles: not responding to link in %s due to black/white list \
+                    log.debug("SpiffyTitles: not responding to links in %s due to black/white list \
                                restrictions" % (channel))
                     return
 
-                info = urlparse(url)
-                domain = info.netloc
-                is_ignored = self.is_ignored_domain(domain, channel)
+                titles = self.get_titles_by_urls(urls, channel)
 
-                if is_ignored:
-                    log.debug("SpiffyTitles: URL ignored due to domain blacklist match: %s" % url)
-                    return
-
-                is_whitelisted_domain = self.is_whitelisted_domain(domain, channel)
-                whitelist_pattern = self.registryValue("whitelistDomainPattern", channel=channel)
-                if whitelist_pattern and not is_whitelisted_domain:
-                    log.debug("SpiffyTitles: URL ignored due to domain whitelist mismatch: %s" %
-                              url)
-                    return
-
-                title = self.get_title_by_url(url, channel)
-
-                if title is not None and title:
-                    ignore_match = self.title_matches_ignore_pattern(title, channel)
-
-                    if ignore_match:
-                        return
+                if titles:
+                    if len(urls) > 1:
+                        response = self.get_numbered_title_response(titles)
                     else:
-                        irc.queueMsg(ircmsgs.privmsg(channel, title))
+                        response = titles[0]
+
+                    irc.queueMsg(ircmsgs.privmsg(channel, response))
                 else:
                     if self.default_handler_enabled:
-                        log.debug("SpiffyTitles: could not get a title for %s" % (url))
+                        log.debug("SpiffyTitles: could not get a title for any link in message")
                     else:
-                        log.debug("SpiffyTitles: could not get a title for %s but default \
-                                   handler is disabled" % (url))
+                        log.debug("SpiffyTitles: could not get a title for any link in message \
+                                   but default handler is disabled")
+
+    def get_titles_by_urls(self, urls, channel):
+        """
+        Return every usable title from the URLs in a message.
+        """
+        titles = []
+
+        for url in urls:
+            title = self.get_title_by_message_url(url, channel)
+
+            if title is not None and title:
+                titles.append(title)
+
+        return titles
+
+    def get_title_by_message_url(self, url, channel):
+        """
+        Return a title for one URL, applying message-time filters.
+        """
+        info = urlparse(url)
+        domain = info.netloc
+        is_ignored = self.is_ignored_domain(domain, channel)
+
+        if is_ignored:
+            log.debug("SpiffyTitles: URL ignored due to domain blacklist match: %s" % url)
+            return
+
+        is_whitelisted_domain = self.is_whitelisted_domain(domain, channel)
+        whitelist_pattern = self.registryValue("whitelistDomainPattern", channel=channel)
+        if whitelist_pattern and not is_whitelisted_domain:
+            log.debug("SpiffyTitles: URL ignored due to domain whitelist mismatch: %s" % url)
+            return
+
+        title = self.get_title_by_url(url, channel)
+
+        if title is not None and title:
+            ignore_match = self.title_matches_ignore_pattern(title, channel)
+
+            if not ignore_match:
+                return title
+
+    def get_numbered_title_response(self, titles):
+        """
+        Format multiple titles as a single, numbered IRC response.
+        """
+        return " | ".join("[%s] %s" % (i + 1, self.strip_title_prefix(title))
+                          for i, title in enumerate(titles))
+
+    def strip_title_prefix(self, title):
+        """
+        Remove the normal snarfer prefix when titles are joined together.
+        """
+        return re.sub(r'^\s*\^\s*', '', title).strip()
 
     def get_title_by_url(self, url, channel):
         """
@@ -1536,14 +1574,26 @@ class SpiffyTitles(callbacks.Plugin):
         """
         Find the first string that looks like a URL from the message
         """
-        url_re = self.registryValue("urlRegularExpression")
-        match = re.search(url_re, input)
+        urls = self.get_urls_from_message(input)
 
-        if match:
+        if urls:
+            return urls[0]
+
+    def get_urls_from_message(self, input):
+        """
+        Find every string that looks like a URL from the message
+        """
+        url_re = self.registryValue("urlRegularExpression")
+        urls = []
+
+        for match in re.finditer(url_re, input):
             raw_url = match.group(0).strip()
             url = self.remove_control_characters(str(raw_url))
 
-            return url
+            if url:
+                urls.append(url)
+
+        return urls
 
     def remove_control_characters(self, s):
         return "".join(ch for ch in s if unicodedata.category(ch)[0] != "C")

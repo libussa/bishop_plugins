@@ -1,0 +1,21 @@
+[project]
+name = "bishop-plugins"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "beautifulsoup4",
+    "certifi",
+    "google-api-python-client",
+    "humanize",
+    "imgurpython",
+    "jinja2",
+    "limnoria @ git+https://github.com/ProgVal/Limnoria.git@master",
+    "lxml",
+    "pytz",
+    "requests",
+    "setuptools",
+    "timeout-decorator",
+]
+
+[tool.uv]
+package = false

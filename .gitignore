@@ -2,6 +2,7 @@
 *.pyc
 *gazelle.conf
 *tmp.py
+.venv/
 
 # Local bot/runtime state does not belong in the plugin distribution repo.
 backup/
@@ -10,7 +11,3 @@ data/
 logs/
 tmp/
 web/
-
-# Local dependency manager experiments; requirements.txt is the source of truth.
-Pipfile
-Pipfile.lock

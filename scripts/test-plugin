@@ -1,0 +1,35 @@
+#!/usr/bin/env sh
+set -eu
+
+if [ "$#" -eq 0 ]; then
+    echo "usage: uv run scripts/test-plugin <PluginName> [PluginName...]" >&2
+    echo "example: uv run scripts/test-plugin SpiffyTitles" >&2
+    exit 64
+fi
+
+repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+tmpdir=$(mktemp -d "${TMPDIR:-/tmp}/bishop-plugin-tests.XXXXXX")
+
+cleanup() {
+    rm -rf "$tmpdir"
+}
+trap cleanup EXIT HUP INT TERM
+
+for plugin in "$@"; do
+    case "$plugin" in
+        ""|.*|*/*)
+            echo "invalid plugin name: $plugin" >&2
+            exit 64
+            ;;
+    esac
+
+    if [ ! -d "$repo_root/$plugin" ]; then
+        echo "plugin directory does not exist: $plugin" >&2
+        exit 66
+    fi
+
+    ln -s "$repo_root/$plugin" "$tmpdir/$plugin"
+done
+
+cd "$repo_root"
+supybot-test --plugins-dir="$tmpdir" "$@"

@@ -1,0 +1,40 @@
+#!/usr/bin/env sh
+set -eu
+
+repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+default_config="$repo_root/../../config/dev/bishop-dev.conf"
+bot_config="${1:-${SPIFFYTITLES_BOT_CONFIG:-}}"
+
+if [ -z "$bot_config" ] && [ -f "$default_config" ]; then
+    bot_config="$default_config"
+fi
+
+config_value() {
+    key="$1"
+    awk -F': ' -v key="$key" '$1 == key {print substr($0, index($0, $2)); exit}' "$bot_config"
+}
+
+set_from_config() {
+    env_name="$1"
+    config_key="$2"
+    eval "current=\${$env_name:-}"
+
+    if [ -n "$current" ] || [ -z "${bot_config:-}" ]; then
+        return
+    fi
+
+    value=$(config_value "$config_key")
+    if [ -n "$value" ]; then
+        export "$env_name=$value"
+    fi
+}
+
+set_from_config SPIFFYTITLES_YOUTUBE_DEVELOPER_KEY \
+    supybot.plugins.SpiffyTitles.youtubeDeveloperKey
+set_from_config SPIFFYTITLES_IMGUR_CLIENT_ID \
+    supybot.plugins.SpiffyTitles.imgurClientID
+set_from_config SPIFFYTITLES_IMGUR_CLIENT_SECRET \
+    supybot.plugins.SpiffyTitles.imgurClientSecret
+
+cd "$repo_root"
+SPIFFYTITLES_LIVE=1 uv run scripts/test-plugin SpiffyTitles

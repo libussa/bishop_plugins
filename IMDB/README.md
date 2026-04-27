@@ -1,1 +1,1 @@
-Queries OMDB database for information about IMDB titles
+Queries IMDb suggestions for information about IMDB titles.

@@ -39,3 +39,27 @@ This avoids Limnoria discovering unrelated plugin tests when you only want to
 run one plugin.
 
 `LastFM` tests are not self-contained; they require external API credentials.
+
+### SpiffyTitles Live Smoke Tests
+
+SpiffyTitles also has opt-in tests that call real upstream services:
+
+```text
+scripts/test-spiffytitles-live
+```
+
+By default the wrapper reads the local dev bot config, if present, for YouTube
+and Imgur credentials. Pass an explicit config path if needed:
+
+```text
+scripts/test-spiffytitles-live /path/to/bishop-dev.conf
+```
+
+You can override individual probe URLs with environment variables like:
+
+```text
+SPIFFYTITLES_LIVE_DAILYMOTION_URL=https://www.dailymotion.com/video/... scripts/test-spiffytitles-live
+```
+
+Imgur and Gazelle live probes are skipped unless suitable URLs/config are
+provided.

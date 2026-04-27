@@ -8,9 +8,13 @@
 from supybot.test import *
 import datetime
 import json
+import os
 from types import SimpleNamespace
+import unittest
 from unittest.mock import patch
 from urllib.parse import urlparse
+
+import timeout_decorator
 
 
 def response(payload, status_code=200):
@@ -141,12 +145,13 @@ class SpiffyTitlesTestCase(ChannelPluginTestCase):
     def testImdbHandler(self):
         plugin = self.irc.getCallback('SpiffyTitles')
         payload = {
-            'Response': 'True',
-            'Title': 'Movie title',
-            'Year': '2020',
-            'Country': 'FR',
-            'imdbRating': '7.1',
-            'Plot': 'Movie plot.',
+            'd': [{
+                'id': 'tt1234567',
+                'l': 'Suggestion title',
+                'q': 'feature',
+                's': 'Actor One, Actor Two',
+                'y': 2020,
+            }],
         }
 
         with patch('SpiffyTitles.plugin.requests.get', return_value=response(payload)):
@@ -154,7 +159,9 @@ class SpiffyTitlesTestCase(ChannelPluginTestCase):
                                         urlparse('https://www.imdb.com/title/tt1234567/'),
                                         self.channel)
 
-        self.assertEqual(title, '^ Movie title (2020, FR) - Rating: 7.1 ::  Movie plot.')
+        self.assertEqual(title,
+                         '^ Suggestion title (2020) - feature :: Actor One, Actor Two :: '
+                         'https://www.imdb.com/title/tt1234567/')
 
     def testWikipediaHandler(self):
         plugin = self.irc.getCallback('SpiffyTitles')
@@ -280,6 +287,171 @@ class SpiffyTitlesTestCase(ChannelPluginTestCase):
             urlparse('https://orpheus.network/torrents.php?id=123'),
             self.channel),
             '^ Gazelle title')
+
+
+class SpiffyTitlesLiveTestCase(ChannelPluginTestCase):
+    plugins = ('SpiffyTitles',)
+
+    def setUp(self):
+        if os.environ.get('SPIFFYTITLES_LIVE') != '1':
+            raise unittest.SkipTest('set SPIFFYTITLES_LIVE=1 to run live upstream tests')
+
+        ChannelPluginTestCase.setUp(self)
+        self.assertNotError('reload SpiffyTitles')
+        conf.supybot.plugins.SpiffyTitles.linkCacheLifetimeInSeconds.setValue(0)
+
+        youtube_key = os.environ.get('SPIFFYTITLES_YOUTUBE_DEVELOPER_KEY')
+        if youtube_key:
+            conf.supybot.plugins.SpiffyTitles.youtubeDeveloperKey.setValue(youtube_key)
+
+        imgur_client_id = os.environ.get('SPIFFYTITLES_IMGUR_CLIENT_ID')
+        if imgur_client_id:
+            conf.supybot.plugins.SpiffyTitles.imgurClientID.setValue(imgur_client_id)
+
+        imgur_client_secret = os.environ.get('SPIFFYTITLES_IMGUR_CLIENT_SECRET')
+        if imgur_client_secret:
+            conf.supybot.plugins.SpiffyTitles.imgurClientSecret.setValue(imgur_client_secret)
+
+    def live_url(self, name, default=None):
+        return os.environ.get('SPIFFYTITLES_LIVE_%s_URL' % name, default)
+
+    def live_call(self, callback):
+        seconds = int(os.environ.get('SPIFFYTITLES_LIVE_TIMEOUT', '20'))
+        return timeout_decorator.timeout(seconds)(callback)()
+
+    def assertLiveTitleContains(self, title, *needles):
+        self.assertTrue(title)
+        for needle in needles:
+            self.assertIn(needle, title)
+
+    def testLiveDefaultHandler(self):
+        plugin = self.irc.getCallback('SpiffyTitles')
+        url = self.live_url('DEFAULT', 'https://example.com/')
+
+        title = self.live_call(lambda: plugin.handler_default(url, self.channel))
+
+        self.assertLiveTitleContains(title, 'Example Domain')
+
+    def testLiveYoutubeHandler(self):
+        if not os.environ.get('SPIFFYTITLES_YOUTUBE_DEVELOPER_KEY'):
+            raise unittest.SkipTest('set SPIFFYTITLES_YOUTUBE_DEVELOPER_KEY')
+
+        plugin = self.irc.getCallback('SpiffyTitles')
+        url = self.live_url('YOUTUBE', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ')
+
+        title = self.live_call(lambda: plugin.handler_youtube(url, urlparse(url).netloc,
+                                                              self.channel))
+
+        self.assertLiveTitleContains(title, 'Duration:', 'Views:')
+
+    def testLiveDailymotionHandler(self):
+        plugin = self.irc.getCallback('SpiffyTitles')
+        url = self.live_url('DAILYMOTION', 'https://www.dailymotion.com/video/x8a0e9g')
+
+        title = self.live_call(lambda: plugin.handler_dailymotion(url, urlparse(url),
+                                                                  self.channel))
+
+        self.assertLiveTitleContains(title, 'Duration:', 'views')
+
+    def testLiveVimeoHandler(self):
+        plugin = self.irc.getCallback('SpiffyTitles')
+        url = self.live_url('VIMEO', 'https://vimeo.com/76979871')
+
+        title = self.live_call(lambda: plugin.handler_vimeo(url, urlparse(url).netloc,
+                                                            self.channel))
+
+        self.assertLiveTitleContains(title, 'Duration:', 'plays')
+
+    def testLiveCoubHandler(self):
+        plugin = self.irc.getCallback('SpiffyTitles')
+        url = self.live_url('COUB', 'https://coub.com/view/g1s3x')
+
+        title = self.live_call(lambda: plugin.handler_coub(url, urlparse(url).netloc,
+                                                           self.channel))
+
+        self.assertLiveTitleContains(title, 'views', 'likes', 'recoubs')
+
+    def testLiveImdbHandler(self):
+        plugin = self.irc.getCallback('SpiffyTitles')
+        url = self.live_url('IMDB', 'https://www.imdb.com/title/tt0111161/')
+
+        title = self.live_call(lambda: plugin.handler_imdb(url, urlparse(url), self.channel))
+
+        self.assertLiveTitleContains(title, 'The Shawshank Redemption')
+
+    def testLiveWikipediaHandler(self):
+        plugin = self.irc.getCallback('SpiffyTitles')
+        url = self.live_url('WIKIPEDIA',
+                            'https://en.wikipedia.org/wiki/Python_(programming_language)')
+
+        title = self.live_call(lambda: plugin.handler_wikipedia(url, urlparse(url).netloc,
+                                                                self.channel))
+
+        self.assertLiveTitleContains(title, 'programming language')
+
+    def testLiveRedditHandler(self):
+        plugin = self.irc.getCallback('SpiffyTitles')
+        url = self.live_url('REDDIT', 'https://www.reddit.com/user/spez/')
+
+        title = self.live_call(lambda: plugin.handler_reddit(url, urlparse(url).netloc,
+                                                             self.channel))
+
+        self.assertLiveTitleContains(title, 'Link karma:', 'Comment karma:')
+
+    def testLiveImgurAlbumHandler(self):
+        if not os.environ.get('SPIFFYTITLES_IMGUR_CLIENT_ID'):
+            raise unittest.SkipTest('set SPIFFYTITLES_IMGUR_CLIENT_ID')
+        if not os.environ.get('SPIFFYTITLES_IMGUR_CLIENT_SECRET'):
+            raise unittest.SkipTest('set SPIFFYTITLES_IMGUR_CLIENT_SECRET')
+
+        url = self.live_url('IMGUR_ALBUM')
+        if not url:
+            raise unittest.SkipTest('set SPIFFYTITLES_LIVE_IMGUR_ALBUM_URL')
+
+        plugin = self.irc.getCallback('SpiffyTitles')
+        title = self.live_call(lambda: plugin.handler_imgur_album(url, urlparse(url),
+                                                                  self.channel))
+
+        self.assertLiveTitleContains(title, 'images', 'views')
+
+    def testLiveImgurImageHandler(self):
+        if not os.environ.get('SPIFFYTITLES_IMGUR_CLIENT_ID'):
+            raise unittest.SkipTest('set SPIFFYTITLES_IMGUR_CLIENT_ID')
+        if not os.environ.get('SPIFFYTITLES_IMGUR_CLIENT_SECRET'):
+            raise unittest.SkipTest('set SPIFFYTITLES_IMGUR_CLIENT_SECRET')
+
+        url = self.live_url('IMGUR_IMAGE')
+        if not url:
+            raise unittest.SkipTest('set SPIFFYTITLES_LIVE_IMGUR_IMAGE_URL')
+
+        plugin = self.irc.getCallback('SpiffyTitles')
+        title = self.live_call(lambda: plugin.handler_imgur_image(url, urlparse(url),
+                                                                  self.channel))
+
+        self.assertLiveTitleContains(title, 'views')
+
+    def testLiveGazelleHandlers(self):
+        redacted_url = self.live_url('REDACTED')
+        orpheus_url = self.live_url('ORPHEUS')
+        if not redacted_url and not orpheus_url:
+            raise unittest.SkipTest('set SPIFFYTITLES_LIVE_REDACTED_URL or '
+                                    'SPIFFYTITLES_LIVE_ORPHEUS_URL')
+
+        plugin = self.irc.getCallback('SpiffyTitles')
+        if not hasattr(plugin, 'api_red') and not hasattr(plugin, 'api_apl'):
+            raise unittest.SkipTest('gazelle.conf is not configured')
+
+        if redacted_url:
+            title = self.live_call(lambda: plugin.handler_redacted(redacted_url,
+                                                                   urlparse(redacted_url),
+                                                                   self.channel))
+            self.assertTrue(title)
+
+        if orpheus_url:
+            title = self.live_call(lambda: plugin.handler_apl(orpheus_url,
+                                                              urlparse(orpheus_url),
+                                                              self.channel))
+            self.assertTrue(title)
 
     
 # vim:set shiftwidth=4 tabstop=4 expandtab textwidth=79:

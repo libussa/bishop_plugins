@@ -114,13 +114,13 @@ timestamp      | If specified, the start time of the video
 Tip: You can use irc colors colors in your templates, but be sure to quote the value
 
 ### imdb handler
-Queries the [OMDB API](http://www.omdbapi.com) to get additional information about [IMDB](http://imdb.com) links
+Queries IMDb suggestions to get additional information about [IMDB](http://imdb.com) links
 
 `imdbHandlerEnabled` - Whether to show additional information about [IMDB](http://imdb.com) links
 
 `imdbTemplate` - This is the template used for [IMDB](http://imdb.com) links
 
-Default value: `^ {{Title}} ({{Year}}, {{Country}}) - Rating: {{imdbRating}} ::  {{Plot}}`
+Default value: `^ {{Title}}{% if Year %} ({{Year}}){% endif %}{% if Type %} - {{Type}}{% endif %}{% if Cast %} :: {{Cast}}{% endif %} :: https://www.imdb.com/title/{{imdbID}}/`
 
 ### imgur handler
 

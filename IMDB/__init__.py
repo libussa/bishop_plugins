@@ -6,7 +6,7 @@
 ###
 
 """
-IMDB: Queries OMDB database for information about IMDB titles
+IMDB: Queries IMDb suggestions for information about IMDB titles
 """
 
 import supybot

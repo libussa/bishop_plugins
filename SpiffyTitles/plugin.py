@@ -661,7 +661,7 @@ class SpiffyTitles(callbacks.Plugin):
 
     def add_imdb_handlers(self):
         """
-        Enables meta info about IMDB links through the OMDB API
+        Enables meta info about IMDB links through IMDb suggestions
         """
         self.handlers["imdb.com"] = self.handler_imdb
 
@@ -983,7 +983,7 @@ class SpiffyTitles(callbacks.Plugin):
 
     def handler_imdb(self, url, info, channel):
         """
-        Handles imdb.com links, querying the OMDB API for additional info
+        Handles imdb.com links, querying IMDb suggestions for additional info
 
         Typical IMDB URL: http://www.imdb.com/title/tt2467372/
         """
@@ -1002,31 +1002,7 @@ class SpiffyTitles(callbacks.Plugin):
         # We can only accommodate a specific format of URL here
         if "/title/" in url:
             imdb_id = url.split("/title/")[1].rstrip("/")
-            omdb_url = "http://www.omdbapi.com/?i=%s&plot=short&r=json&tomatoes=true" % (imdb_id)
-
-            try:
-                request = requests.get(omdb_url, timeout=10, headers=headers)
-
-                if request.status_code == requests.codes.ok:
-                    response = json.loads(request.text)
-                    result = None
-                    imdb_template = Template(self.registryValue("imdbTemplate"))
-                    not_found = "Error" in response
-                    unknown_error = response["Response"] != "True"
-
-                    if not_found or unknown_error:
-                        log.debug("SpiffyTitles: OMDB error for %s" % (omdb_url))
-                    else:
-                        result = imdb_template.render(response)
-                else:
-                    log.error("SpiffyTitles OMDB API %s - %s" % (request.status_code, request.text))
-
-            except requests.exceptions.Timeout as e:
-                log.error("SpiffyTitles imdb Timeout: %s" % (str(e)))
-            except requests.exceptions.ConnectionError as e:
-                log.error("SpiffyTitles imdb ConnectionError: %s" % (str(e)))
-            except requests.exceptions.HTTPError as e:
-                log.error("SpiffyTitles imdb HTTPError: %s" % (str(e)))
+            result = self.get_imdb_title(imdb_id, headers)
 
         if result is not None:
             return result
@@ -1034,6 +1010,45 @@ class SpiffyTitles(callbacks.Plugin):
             log.debug("SpiffyTitles: IMDB handler failed. calling default handler")
 
             return self.handler_default(url, channel)
+
+    def get_imdb_title(self, imdb_id, headers):
+        suggestion_url = "https://v3.sg.media-imdb.com/suggestion/t/%s.json" % (imdb_id)
+
+        try:
+            request = requests.get(suggestion_url, timeout=10, headers=headers)
+
+            if request.status_code == requests.codes.ok:
+                response = json.loads(request.text)
+                items = response.get("d", [])
+                match = None
+
+                for item in items:
+                    if item.get("id") == imdb_id:
+                        match = item
+                        break
+
+                if match:
+                    imdb_template = Template(self.registryValue("imdbTemplate"))
+                    return imdb_template.render({
+                        "Title": match.get("l", ""),
+                        "Year": match.get("y", ""),
+                        "Type": match.get("q", ""),
+                        "Cast": match.get("s", ""),
+                        "imdbID": match.get("id", imdb_id)
+                    })
+                else:
+                    log.debug("SpiffyTitles: IMDb suggestion returned no match for %s" %
+                              (imdb_id))
+            else:
+                log.error("SpiffyTitles IMDb suggestion API %s - %s" %
+                          (request.status_code, request.text))
+
+        except requests.exceptions.Timeout as e:
+            log.error("SpiffyTitles imdb suggestion Timeout: %s" % (str(e)))
+        except requests.exceptions.ConnectionError as e:
+            log.error("SpiffyTitles imdb suggestion ConnectionError: %s" % (str(e)))
+        except requests.exceptions.HTTPError as e:
+            log.error("SpiffyTitles imdb suggestion HTTPError: %s" % (str(e)))
 
     def handler_wikipedia(self, url, domain, channel):
         """

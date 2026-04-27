@@ -37,12 +37,8 @@ conf.registerGlobalValue(SpiffyTitles, 'wallClockTimeoutInSeconds',
 conf.registerGlobalValue(SpiffyTitles, 'language',
      registry.String("en-US", _("""Language code""")))
 
-# imdb template
 conf.registerGlobalValue(SpiffyTitles, 'imdbTemplate',
-     registry.String("^ {{Title}} ({{Year}}, {{Country}}) - Rating: {{imdbRating}} ::  {{Plot}}", _("""Uses http://www.omdbapi.com to provide additional information about IMDB links""")))
-
-# alternative template:
-#                     ^ {{Title}} ({{Year}} - {{Director}}) :: [i:{{imdbRating}} r:{{tomatoMeter}} m:{{Metascore}}] {{Plot}}
+     registry.String("^ {{Title}}{% if Year %} ({{Year}}){% endif %}{% if Type %} - {{Type}}{% endif %}{% if Cast %} :: {{Cast}}{% endif %} :: https://www.imdb.com/title/{{imdbID}}/", _("""Template used for IMDB links.""")))
 
 conf.registerGlobalValue(SpiffyTitles, 'coubTemplate',
      registry.String("^ {%if not_safe_for_work %}NSFW{% endif %} [{{channel.title}}] {{title}} :: {{views_count}} views :: {{likes_count}} likes :: {{recoubs_count}} recoubs", _("""Uses Coub API to get additional information about coub.com links""")))

@@ -96,10 +96,15 @@ class SpiffyTitles(callbacks.Plugin):
 
 
     def add_gazelle_handlers(self):
-        self.api_red = gazapi.GazAPI(os.path.join(os.path.abspath(os.path.dirname(__file__)),'gazelle.conf'), 'redacted')
+        config_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'gazelle.conf')
+        if not os.path.exists(config_path):
+            log.warning("SpiffyTitles: %s is missing; gazelle handlers disabled", config_path)
+            return
+
+        self.api_red = gazapi.GazAPI(config_path, 'redacted')
         self.handlers["redacted.sh"] = self.handler_redacted
 
-        self.api_apl = gazapi.GazAPI(os.path.join(os.path.abspath(os.path.dirname(__file__)),'gazelle.conf'), 'orpheus')
+        self.api_apl = gazapi.GazAPI(config_path, 'orpheus')
         self.handlers["orpheus.network"] = self.handler_apl
 
 

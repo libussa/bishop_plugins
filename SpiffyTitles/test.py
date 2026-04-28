@@ -14,6 +14,7 @@ import unittest
 from unittest.mock import patch
 from urllib.parse import urlparse
 
+import requests
 import timeout_decorator
 
 
@@ -48,6 +49,39 @@ class SpiffyTitlesTestCase(ChannelPluginTestCase):
 
         self.assertEqual(plugin.get_numbered_title_response(['^ First', 'Second']),
                          '[1] First | [2] Second')
+
+    def testNumberedTitleResponsePreservesOriginalUrlIndexes(self):
+        plugin = self.irc.getCallback('SpiffyTitles')
+
+        self.assertEqual(
+            plugin.get_numbered_title_response([(2, '^ Second'), (4, 'Fourth')]),
+            '[2] Second | [4] Fourth')
+
+    def testMultiUrlMessagePreservesIndexWhenFirstUrlFails(self):
+        plugin = self.irc.getCallback('SpiffyTitles')
+
+        with patch.object(plugin, 'get_title_by_message_url',
+                          side_effect=[None, '^ Amazon.fr']):
+            titles = plugin.get_titles_by_urls([
+                'https://dead.example',
+                'https://www.amazon.fr/dp/B0CTH7CVGB',
+            ], self.channel)
+
+        self.assertEqual(titles, [(2, '^ Amazon.fr')])
+        self.assertEqual(plugin.get_numbered_title_response(titles),
+                         '[2] Amazon.fr')
+
+    def testDeadDefaultUrlDoesNotLogAsError(self):
+        plugin = self.irc.getCallback('SpiffyTitles')
+
+        with patch('SpiffyTitles.plugin.requests.get',
+                   side_effect=requests.exceptions.ConnectionError("no dns")) as get:
+            with patch('SpiffyTitles.plugin.log.error') as error_log:
+                self.assertEqual(plugin.get_source_by_url('https://dead.example'),
+                                 (None, False, None))
+
+        self.assertEqual(get.call_count, 1)
+        error_log.assert_not_called()
 
     def testDefaultHandler(self):
         plugin = self.irc.getCallback('SpiffyTitles')

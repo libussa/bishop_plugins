@@ -492,7 +492,7 @@ class SpiffyTitles(callbacks.Plugin):
                     if len(urls) > 1:
                         response = self.get_numbered_title_response(titles)
                     else:
-                        response = titles[0]
+                        response = self.get_title_from_numbered_entry(titles[0])
 
                     irc.queueMsg(ircmsgs.privmsg(channel, response))
                 else:
@@ -508,11 +508,11 @@ class SpiffyTitles(callbacks.Plugin):
         """
         titles = []
 
-        for url in urls:
+        for index, url in enumerate(urls, start=1):
             title = self.get_title_by_message_url(url, channel)
 
             if title is not None and title:
-                titles.append(title)
+                titles.append((index, title))
 
         return titles
 
@@ -546,8 +546,20 @@ class SpiffyTitles(callbacks.Plugin):
         """
         Format multiple titles as a single, numbered IRC response.
         """
-        return " | ".join("[%s] %s" % (i + 1, self.strip_title_prefix(title))
-                          for i, title in enumerate(titles))
+        return " | ".join("[%s] %s" % (
+            self.get_number_from_numbered_entry(entry, i + 1),
+            self.strip_title_prefix(self.get_title_from_numbered_entry(entry)))
+            for i, entry in enumerate(titles))
+
+    def get_number_from_numbered_entry(self, entry, default):
+        if isinstance(entry, tuple):
+            return entry[0]
+        return default
+
+    def get_title_from_numbered_entry(self, entry):
+        if isinstance(entry, tuple):
+            return entry[1]
+        return entry
 
     def strip_title_prefix(self, title):
         """
@@ -1508,21 +1520,19 @@ class SpiffyTitles(callbacks.Plugin):
                                                                        request.content))
 
         except timeout_decorator.TimeoutError:
-            log.error("SpiffyTitles: wall timeout!")
+            log.debug("SpiffyTitles: wall timeout for %s", url)
 
-            self.get_source_by_url(url, retries + 1)
+            return self.get_source_by_url(url, retries + 1)
         except requests.exceptions.MissingSchema as e:
             url_wschema = "http://%s" % (url)
             log.error("SpiffyTitles missing schema. Retrying with %s" % (url_wschema))
             return self.get_source_by_url(url_wschema)
         except requests.exceptions.Timeout as e:
-            log.error("SpiffyTitles Timeout: %s" % (str(e)))
+            log.debug("SpiffyTitles Timeout: %s" % (str(e)))
 
-            self.get_source_by_url(url, retries + 1)
+            return self.get_source_by_url(url, retries + 1)
         except requests.exceptions.ConnectionError as e:
-            log.error("SpiffyTitles ConnectionError: %s" % (str(e)))
-
-            self.get_source_by_url(url, retries + 1)
+            log.debug("SpiffyTitles ConnectionError: %s" % (str(e)))
         except requests.exceptions.HTTPError as e:
             log.error("SpiffyTitles HTTPError: %s" % (str(e)))
         except requests.exceptions.InvalidURL as e:

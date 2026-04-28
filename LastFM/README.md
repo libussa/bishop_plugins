@@ -25,6 +25,9 @@ Showing now playing information:
 <@GLolol> %np RJ
 <@Atlas> The Shadows — Apache — instrumental, surf rock — 42x
 ```
+When used in a channel, `%np <nick>` first checks whether `<nick>` is a
+registered channel user with a saved LastFM username. If not, `<nick>` is used
+as a LastFM username directly.
 
 Setting your LastFM user:
 ```

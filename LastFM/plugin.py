@@ -360,17 +360,53 @@ class LastFM(callbacks.Plugin):
                 return f"https://youtu.be/{id_info['videoId']}"
         return ''
 
+    def get_channel_user(self, irc, channel, nick):
+        if not irc.isChannel(channel):
+            return None
+
+        try:
+            state = irc.state.channels[channel]
+        except KeyError:
+            return None
+
+        channel_nick = None
+        for candidate in state.users:
+            if ircutils.strEqual(candidate, nick):
+                channel_nick = candidate
+                break
+        if channel_nick is None:
+            return None
+
+        try:
+            hostmask = irc.state.nickToHostmask(channel_nick)
+        except KeyError:
+            return None
+
+        return self.db.get(hostmask)
+
+    def get_np_user(self, irc, msg, user):
+        if user is None:
+            user = self.db.get(msg.prefix)
+            if not user:
+                irc.error("use .set <LastFM username> first.", Raise=True)
+            return user
+
+        channel_user = self.get_channel_user(irc, msg.args[0], user)
+        if channel_user:
+            return channel_user
+        return user
+
     @wrap([optional("something")])
     def np(self, irc, msg, args, user):
         """[<user>]
 
         Announces the track currently being played by <user>. If <user>
-        is not given, defaults to the LastFM user configured for your
-        current nick.
+        matches a registered nick in the current channel, uses that nick's
+        LastFM user. Otherwise, treats <user> as a LastFM username. If <user>
+        is not given, defaults to the LastFM user configured for your current
+        nick.
         """
-        user = (user or self.db.get(msg.prefix))
-        if not user:
-            irc.error("use .set <LastFM username> first.", Raise=True)
+        user = self.get_np_user(irc, msg, user)
 
         trackdata, user = self.get_recent_track(irc, user)
         artist = self.text_value(trackdata.get("artist"))

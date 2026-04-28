@@ -33,6 +33,7 @@ from supybot.test import *
 import json
 from urllib import parse
 from unittest.mock import patch
+import supybot.irclib as irclib
 import supybot.utils as utils
 
 
@@ -70,6 +71,16 @@ class LastFMTestCase(PluginTestCase):
             return response(handlers[method](query))
         return get_url
 
+    def add_channel_user(self, channel, nick, lastfm_user=None):
+        state = self.irc.state.channels.setdefault(
+            channel, irclib.ChannelState())
+        state.addUser(nick)
+        hostmask = "%s!user@example.invalid" % nick
+        self.irc.state.nicksToHostmasks[nick] = hostmask
+        if lastfm_user is not None:
+            plugin = self.irc.getCallback('LastFM')
+            plugin.db.set(hostmask, lastfm_user)
+
     def testNowPlaying(self):
         def track_info(query):
             self.assertEqual(query["artist"], ["Artist & Co"])
@@ -97,6 +108,43 @@ class LastFMTestCase(PluginTestCase):
             self.assertResponse(
                 "np krf",
                 "Artist & Co \u2014 Song + Tune \u2014 indie, rock \u2014 4x")
+
+    def testNowPlayingResolvesRegisteredChannelNick(self):
+        self.add_channel_user("#test", "Alice", "alice_lfm")
+
+        def recent_tracks(query):
+            self.assertEqual(query["user"], ["alice_lfm"])
+            return recent_track_payload(artist="Mapped Artist", track="Mapped Track")
+
+        handlers = {
+            "user.getrecenttracks": recent_tracks,
+            "artist.getinfo": lambda query: {"artist": {"tags": {"tag": []}}},
+            "track.getInfo": lambda query: {"track": {}},
+        }
+
+        with patch('LastFM.plugin.utils.web.getUrl',
+                   side_effect=self.lastfm_get_url(handlers)):
+            self.assertResponse(
+                "@np Alice", "test: Mapped Artist \u2014 Mapped Track",
+                to="#test")
+
+    def testNowPlayingFallsBackToLastfmUserWhenChannelNickIsUnregistered(self):
+        self.add_channel_user("#test", "Alice")
+
+        def recent_tracks(query):
+            self.assertEqual(query["user"], ["Alice"])
+            return recent_track_payload(artist="Raw Artist", track="Raw Track")
+
+        handlers = {
+            "user.getrecenttracks": recent_tracks,
+            "artist.getinfo": lambda query: {"artist": {"tags": {"tag": []}}},
+            "track.getInfo": lambda query: {"track": {}},
+        }
+
+        with patch('LastFM.plugin.utils.web.getUrl',
+                   side_effect=self.lastfm_get_url(handlers)):
+            self.assertResponse("@np Alice", "test: Raw Artist \u2014 Raw Track",
+                                to="#test")
 
     def testNowPlayingSurvivesOptionalMetadataErrors(self):
         handlers = {

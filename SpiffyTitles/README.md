@@ -222,11 +222,17 @@ titles will be shown in all channels. Default value: `""`
 `channelBlacklist` - a comma separated list of channels in which titles should never be displayed. If `""`,
 titles will be shown in all channels. Default value: `""`
 
+`handlerWhitelist` - a comma separated list of handlers allowed in a channel. If `""`,
+all handlers are allowed. Supported names include `amazon`, `coub`, `dailymotion`, `default`, `gazelle`,
+`imdb`, `imgur`, `reddit`, `vimeo`, `wikipedia`, and `youtube`. The `gazelle` handler includes
+`redacted` and `orpheus` links.
+
 ### About white/black lists
 
 - If `channelWhitelist` and `channelBlacklist` are empty, then titles will be displayed in every channel
 - If `channelBlacklist` has #foo, then titles will be displayed in every channel except #foo
 - If `channelWhitelist` has #foo then `channelBlacklist` will be ignored
+- If `handlerWhitelist` is set for #foo, only those handlers will run in #foo
 
 ### Examples
 
@@ -245,6 +251,11 @@ titles will be shown in all channels. Default value: `""`
 ### Remove channel whitelist
 
     !config supybot.plugins.SpiffyTitles.channelWhitelist ""
+
+### Only show Gazelle titles in #code
+
+    !config supybot.plugins.SpiffyTitles.channelWhitelist #bar,#code
+    !config channel #code supybot.plugins.SpiffyTitles.handlerWhitelist gazelle
 
 `ignoredDomainPattern` - ignore domains matching this pattern. Default value: `""`
 

@@ -49,6 +49,21 @@ class SpiffyTitles(callbacks.Plugin):
     callBefore = ["Web"]
     link_cache = []
     handlers = {}
+    handler_whitelist_aliases = {
+        "handler_amazon": set(["amazon"]),
+        "handler_apl": set(["apl", "gazelle", "orpheus"]),
+        "handler_coub": set(["coub"]),
+        "handler_dailymotion": set(["dailymotion"]),
+        "handler_default": set(["default"]),
+        "handler_imdb": set(["imdb"]),
+        "handler_imgur": set(["imgur"]),
+        "handler_imgur_image": set(["imgur"]),
+        "handler_reddit": set(["reddit"]),
+        "handler_redacted": set(["gazelle", "redacted"]),
+        "handler_vimeo": set(["vimeo"]),
+        "handler_wikipedia": set(["wikipedia"]),
+        "handler_youtube": set(["youtube"]),
+    }
     wall_clock_timeout = 8
     max_request_retries = 3
     imgur_client = None
@@ -586,9 +601,16 @@ class SpiffyTitles(callbacks.Plugin):
         """
         Retrieves the title of a website based on the URL provided
         """
-        info = urlparse(url)
-        domain = info.netloc
         title = None
+        handler, info, is_default_handler = self.get_handler_for_url(url)
+
+        if handler is None:
+            return title
+
+        if not self.is_handler_allowed(handler, channel):
+            log.debug("SpiffyTitles: handler %s is not allowed in %s" %
+                      (self.get_handler_display_name(handler), channel))
+            return title
 
         """
         Check if we have this link cached according to the cache lifetime. If so, serve
@@ -599,17 +621,10 @@ class SpiffyTitles(callbacks.Plugin):
         if cached_link is not None:
             title = cached_link["title"]
         else:
-            if domain in self.handlers:
-                handler = self.handlers[domain]
-                title = handler(url, info, channel)
+            if is_default_handler:
+                title = handler(url, channel)
             else:
-                base_domain = self.get_base_domain('http://' + domain)
-                if base_domain in self.handlers:
-                    handler = self.handlers[base_domain]
-                    title = handler(url, info, channel)
-                else:
-                    if self.default_handler_enabled:
-                        title = self.handler_default(url, channel)
+                title = handler(url, info, channel)
 
         if title is not None:
             title = self.get_formatted_title(title, channel)
@@ -624,6 +639,53 @@ class SpiffyTitles(callbacks.Plugin):
             })
 
         return title
+
+    def get_handler_for_url(self, url):
+        info = urlparse(url)
+        domain = info.netloc
+
+        if domain in self.handlers:
+            return self.handlers[domain], info, False
+
+        base_domain = self.get_base_domain('http://' + domain)
+        if base_domain in self.handlers:
+            return self.handlers[base_domain], info, False
+
+        if self.default_handler_enabled:
+            return self.handler_default, info, True
+
+        return None, info, False
+
+    def is_handler_allowed(self, handler, channel):
+        handler_whitelist = self.get_handler_whitelist(channel)
+        if not handler_whitelist:
+            return True
+
+        handler_names = self.get_handler_names(handler)
+        return bool(handler_whitelist.intersection(handler_names))
+
+    def get_handler_whitelist(self, channel):
+        return set([handler.strip().lower()
+                    for handler in self.registryValue("handlerWhitelist",
+                                                      channel=channel)
+                    if len(handler.strip())])
+
+    def get_handler_names(self, handler):
+        handler_name = getattr(handler, "__name__", "")
+        names = set(self.handler_whitelist_aliases.get(handler_name, set()))
+
+        if handler_name.startswith("handler_"):
+            names.add(handler_name[len("handler_"):])
+        elif handler_name:
+            names.add(handler_name)
+
+        return names
+
+    def get_handler_display_name(self, handler):
+        handler_names = sorted(self.get_handler_names(handler))
+        if handler_names:
+            return "/".join(handler_names)
+        return getattr(handler, "__name__", repr(handler))
 
     def t(self, irc, msg, args, query):
         """

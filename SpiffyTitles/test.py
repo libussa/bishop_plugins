@@ -360,6 +360,35 @@ class SpiffyTitlesTestCase(ChannelPluginTestCase):
             self.channel),
             '^ Gazelle title')
 
+    def testHandlerWhitelistAllowsGazelleAlias(self):
+        plugin = self.irc.getCallback('SpiffyTitles')
+        conf.supybot.plugins.SpiffyTitles.handlerWhitelist.get(
+            self.channel).setValue(['gazelle'])
+        plugin.api_red = SimpleNamespace(request=lambda **args: {
+            'group': {
+                'categoryName': 'Movies',
+                'name': 'Gazelle title',
+            },
+        })
+        plugin.handlers['redacted.sh'] = plugin.handler_redacted
+
+        self.assertEqual(plugin.get_title_by_url(
+            'https://redacted.sh/torrents.php?id=123', self.channel),
+            '^ Gazelle title')
+
+    def testHandlerWhitelistBlocksDisallowedHandlerBeforeCache(self):
+        plugin = self.irc.getCallback('SpiffyTitles')
+        conf.supybot.plugins.SpiffyTitles.handlerWhitelist.get(
+            self.channel).setValue(['gazelle'])
+        plugin.link_cache.append({
+            'url': 'https://youtube.com/watch?v=abc12345678',
+            'timestamp': datetime.datetime.now(),
+            'title': '^ Cached YouTube title',
+        })
+
+        self.assertIsNone(plugin.get_title_by_url(
+            'https://youtube.com/watch?v=abc12345678', self.channel))
+
 
 class SpiffyTitlesLiveTestCase(ChannelPluginTestCase):
     plugins = ('SpiffyTitles',)

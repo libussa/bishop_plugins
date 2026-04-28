@@ -34,7 +34,6 @@ from __future__ import unicode_literals
 import supybot.utils as utils
 from supybot.commands import *
 import supybot.conf as conf
-import supybot.plugins as plugins
 import supybot.ircutils as ircutils
 import supybot.callbacks as callbacks
 import supybot.world as world
@@ -42,7 +41,7 @@ import supybot.log as log
 import supybot.ircdb as ircdb
 
 import json
-from datetime import datetime, timedelta
+from datetime import datetime
 import pickle
 import humanize
 from urllib import parse
@@ -60,15 +59,16 @@ class LastFMDB():
     ident@host if they are not logged in.
     """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, filename):
         """
         Loads the existing database, creating a new one in memory if none
         exists.
         """
+        self.filename = filename
         self.db = {}
         try:
-            with open(filename, 'rb') as f:
-               self.db = pickle.load(f)
+            with open(self.filename, 'rb') as f:
+                self.db = pickle.load(f)
         except Exception as e:
             log.debug('LastFM: Unable to load database, creating '
                       'a new one: %s', e)
@@ -76,7 +76,7 @@ class LastFMDB():
     def flush(self):
         """Exports the database to a file."""
         try:
-            with open(filename, 'wb') as f:
+            with open(self.filename, 'wb') as f:
                 pickle.dump(self.db, f, 2)
         except Exception as e:
             log.warning('LastFM: Unable to write database: %s', e)
@@ -94,7 +94,7 @@ class LastFMDB():
         self.db[user] = newId
 
     def get(self, prefix):
-        """Sets a user ID given the user's prefix."""
+        """Gets a user ID given the user's prefix."""
 
         try:  # Try to first look up the caller as a bot account.
             userobj = ircdb.users.getUser(prefix)
@@ -106,6 +106,7 @@ class LastFMDB():
         # Automatically returns None if entry does not exist
         return self.db.get(user)
 
+
 class LastFM(callbacks.Plugin):
     threaded = True
 
@@ -115,22 +116,19 @@ class LastFM(callbacks.Plugin):
         self.db = LastFMDB(filename)
         world.flushers.append(self.db.flush)
 
-        # 2.0 API (see http://www.lastfm.de/api/intro)
-        self.APIURL = "http://ws.audioscrobbler.com/2.0/?"
-
-        youtubeApiKey = self.registryValue("youtubeApiKey")
-        self.youtube = build("youtube", "v3", developerKey=youtubeApiKey)
+        # 2.0 API (see https://www.last.fm/api/intro)
+        self.APIURL = "https://ws.audioscrobbler.com/2.0/?"
+        self.youtube = None
+        self.youtube_api_key = None
 
         # max length of fields for wp
         self.user_max_length = 16
         self.artist_max_length = 20
 
-
     def die(self):
         world.flushers.remove(self.db.flush)
         self.db.flush()
         self.__parent.die()
-
 
     def get_apiKey(self, irc):
         apiKey = self.registryValue("apiKey")
@@ -138,66 +136,130 @@ class LastFM(callbacks.Plugin):
             irc.error("The API Key is not set. Please set it via "
                       "'config plugins.lastfm.apikey' and reload the plugin. "
                       "You can sign up for an API Key using "
-                      "http://www.last.fm/api/account/create", Raise=True)
+                      "https://www.last.fm/api/account/create", Raise=True)
 
         return apiKey
 
-    def get_user(self, msg, user, irc):
-        if user != None:
-            nick = user
-            try:
-                # To find last.fm id in plugin database
-                hostmask = irc.state.nickToHostmask(user)
-                userx = self.db.get(hostmask)
-                if userx != None:
-                    user = userx
-                else:
-                    irc.reply("%s is not registered with the bot" % user)
-                    irc.error("Bot only supports top artists for registered users", Raise=True)
-
-            except:
-                irc.reply("%s is not registered with the bot" % user)
-                irc.error("Bot only supports top artist for registered users", Raise=True)
-        else:
-            nick = msg.nick
-            user = self.db.get(msg.prefix)
-        return nick, user
-
-
-    def get_artist_tags(self, artist, irc):
-        """
-       Retourne les tags pour un artiste donné
-       :param artist: Nom de l'artiste
-       :param irc: irc
-       :return: liste de tags
-       """
+    def lastfm_request(self, irc, method, quiet=False, **params):
         apiKey = self.get_apiKey(irc)
-        url = "%sapi_key=%s&method=artist.getinfo&artist=%s&format=json" % (self.APIURL, apiKey, artist)
-        tags = []
+        request_params = dict(params)
+        request_params.update({
+            'api_key': apiKey,
+            'method': method,
+            'format': 'json',
+        })
+        url = self.APIURL + parse.urlencode(request_params)
+        safe_params = {k: v for k, v in request_params.items()
+                       if k != 'api_key'}
+        self.log.debug("LastFM.%s: params %r", method, safe_params)
 
         try:
-            f = utils.web.getUrl(url).decode("utf-8")
-            data = json.loads(f)['artist']['tags']['tag']
-            for tag in data:
-                tags.append(tag['name'])
-        except utils.web.Error:
+            raw = utils.web.getUrl(url).decode("utf-8")
+        except utils.web.Error as e:
+            return self.lastfm_error(
+                irc, method, "Last.fm is not responding right now. Try again later.",
+                e, quiet)
+        except UnicodeDecodeError as e:
+            return self.lastfm_error(
+                irc, method, "Last.fm returned an invalid response. Try again later.",
+                e, quiet)
+
+        try:
+            data = json.loads(raw)
+        except ValueError as e:
+            return self.lastfm_error(
+                irc, method, "Last.fm returned an invalid response. Try again later.",
+                e, quiet)
+
+        if isinstance(data, dict) and data.get('error'):
+            message = data.get('message') or 'unknown API error'
+            return self.lastfm_error(
+                irc, method, "Last.fm error: %s" % message, None, quiet)
+
+        return data
+
+    def lastfm_error(self, irc, method, user_message, exception=None, quiet=False):
+        if exception is not None:
+            self.log.warning("LastFM.%s failed: %s", method, exception)
+        else:
+            self.log.warning("LastFM.%s failed: %s", method, user_message)
+        if quiet:
             return None
-        except KeyError:
-            return None
+        irc.error(user_message, Raise=True)
 
-        self.log.debug("LastFM.artist.getinfos: url %s", url)
+    def malformed_lastfm_response(self, irc, method, quiet=False):
+        return self.lastfm_error(
+            irc, method, "Last.fm returned an unexpected response. Try again later.",
+            None, quiet)
 
-        return tags
+    def as_list(self, value):
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return value
+        return [value]
 
+    def text_value(self, value):
+        if isinstance(value, dict):
+            value = value.get('#text', '')
+        if value is None:
+            return ''
+        return str(value).strip()
+
+    def get_user(self, msg, user, irc):
+        if user is not None:
+            nick = user
+            try:
+                hostmask = irc.state.nickToHostmask(user)
+            except KeyError:
+                irc.error("%s is not registered with the bot" % user, Raise=True)
+            userx = self.db.get(hostmask)
+            if userx is None:
+                irc.error("%s is not registered with the bot" % user, Raise=True)
+            return nick, userx
+
+        nick = msg.nick
+        user = self.db.get(msg.prefix)
+        if user is None:
+            irc.error("use .set <LastFM username> first.", Raise=True)
+        return nick, user
+
+    def get_artist_tags(self, artist, irc):
+        data = self.lastfm_request(
+            irc, 'artist.getinfo', quiet=True, artist=artist)
+        if not data:
+            return []
+
+        try:
+            tags = data['artist']['tags']['tag']
+        except (KeyError, TypeError):
+            self.malformed_lastfm_response(irc, 'artist.getinfo', quiet=True)
+            return []
+
+        return [tag['name'] for tag in self.as_list(tags)
+                if isinstance(tag, dict) and tag.get('name')]
+
+    def get_track_info(self, irc, user, artist, track):
+        data = self.lastfm_request(
+            irc, 'track.getInfo', quiet=True, user=user, artist=artist,
+            track=track)
+        if not data:
+            return {}
+
+        try:
+            return data['track']
+        except (KeyError, TypeError):
+            self.malformed_lastfm_response(irc, 'track.getInfo', quiet=True)
+            return {}
 
     def get_topartists(self, irc, msg, user, duration):
-        apiKey = self.get_apiKey(irc)
-
-        if duration in ['overall', '7day', '1month', '3month', '6month', '12month']:
-            duration = duration
-        else:
-            irc.reply("Duration must be one of: overall | 7day | 1month | 3month | 6month | 12month. Using default.")
-            duration = "1month"
+        valid_durations = ['overall', '7day', '1month', '3month', '6month', '12month']
+        if duration is None:
+            duration = '6month'
+        elif duration not in valid_durations:
+            irc.reply("Duration must be one of: overall | 7day | 1month | "
+                      "3month | 6month | 12month. Using default.")
+            duration = "6month"
 
         duration_dict = {
                 'overall' : 'since forever',
@@ -207,24 +269,96 @@ class LastFM(callbacks.Plugin):
                 '6month'  : 'for the last 6 months',
                 '12month' : 'for the last year'}
 
-        # Get library information for user
-        limit = 10 # specify artists to return per page (api supports max of 1000)
-        # Get list of artists for each library
-        url = "%sapi_key=%s&method=user.gettopartists&user=%s&limit=%d&period=%s&format=json" % (self.APIURL, apiKey, user, limit, duration)
-        self.log.debug("LastFM.library: url %s", url)
-
+        data = self.lastfm_request(
+            irc, 'user.gettopartists', user=user, limit=10, period=duration)
         try:
-            f = utils.web.getUrl(url).decode("utf-8")
-        except utils.web.Error:
-            irc.error("Unknown LastFM user '%s'." % user, Raise=True)
-        libraryList = json.loads(f)
-        artists = []
+            artist_data = data['topartists']['artist']
+        except (KeyError, TypeError):
+            self.malformed_lastfm_response(irc, 'user.gettopartists')
 
-        for artist in libraryList["topartists"]["artist"]:
-            artists.append({'name': artist['name'], 'playcount' : artist['playcount']})
+        artists = []
+        for artist in self.as_list(artist_data):
+            if not isinstance(artist, dict):
+                continue
+            name = artist.get('name')
+            playcount = artist.get('playcount')
+            if name and playcount:
+                artists.append({'name': name, 'playcount' : playcount})
 
         return artists, duration, duration_dict
 
+    def get_recent_track(self, irc, user, quiet=False):
+        data = self.lastfm_request(
+            irc, 'user.getrecenttracks', quiet=quiet, user=user, limit=2)
+        if not data:
+            return None, None
+
+        try:
+            recent = data['recenttracks']
+            user = recent['@attr']['user']
+            tracks = self.as_list(recent.get('track'))
+        except (KeyError, TypeError):
+            self.malformed_lastfm_response(irc, 'user.getrecenttracks', quiet=quiet)
+            return None, None
+
+        if not tracks:
+            if quiet:
+                return None, user
+            irc.error("%s doesn't seem to have listened to anything." % user,
+                      Raise=True)
+
+        trackdata = tracks[0]
+        if not isinstance(trackdata, dict):
+            self.malformed_lastfm_response(irc, 'user.getrecenttracks', quiet=quiet)
+            return None, user
+
+        return trackdata, user
+
+    def get_youtube_client(self):
+        youtubeApiKey = self.registryValue("youtubeApiKey")
+        if not youtubeApiKey:
+            self.log.warning("LastFM: fetchYouTubeLink is enabled but youtubeApiKey is not set")
+            return None
+
+        if self.youtube is None or self.youtube_api_key != youtubeApiKey:
+            try:
+                self.youtube = build(
+                    "youtube", "v3", developerKey=youtubeApiKey,
+                    cache_discovery=False)
+                self.youtube_api_key = youtubeApiKey
+            except Exception as e:
+                self.log.warning("LastFM: unable to initialize YouTube API client: %s", e)
+                self.youtube = None
+                self.youtube_api_key = None
+        return self.youtube
+
+    def get_youtube_link(self, artist, track):
+        youtube = self.get_youtube_client()
+        if youtube is None:
+            return ''
+
+        try:
+            search_response = youtube.search().list(
+                q=f"{artist} {track}",
+                part="id",
+                maxResults=5,
+                type="video"
+            ).execute()
+        except HttpError as e:
+            self.log.warning("YouTube API error %s: %s", e.resp.status, e.content)
+            return ''
+        except BrokenPipeError as e:
+            self.log.warning("YouTube API error: %s", e)
+            return ''
+        except Exception as e:
+            self.log.warning("YouTube API error: %s", e)
+            return ''
+
+        for item in search_response.get("items", []):
+            id_info = item.get("id", {})
+            if id_info.get("kind") == "youtube#video" and "videoId" in id_info:
+                return f"https://youtu.be/{id_info['videoId']}"
+        return ''
 
     @wrap([optional("something")])
     def np(self, irc, msg, args, user):
@@ -234,114 +368,47 @@ class LastFM(callbacks.Plugin):
         is not given, defaults to the LastFM user configured for your
         current nick.
         """
-        apiKey = self.get_apiKey(irc)
         user = (user or self.db.get(msg.prefix))
         if not user:
             irc.error("use .set <LastFM username> first.", Raise=True)
 
-        # see http://www.lastfm.de/api/show/user.getrecenttracks
-        url = "%sapi_key=%s&method=user.getrecenttracks&user=%s&format=json&limit=2" \
-                % (self.APIURL, apiKey, user)
-        try:
-            f = utils.web.getUrl(url).decode("utf-8")
-        except utils.web.Error:
-            irc.error("Unknown user %s." % user, Raise=True)
-        self.log.debug("LastFM.nowPlaying: url %s", url)
+        trackdata, user = self.get_recent_track(irc, user)
+        artist = self.text_value(trackdata.get("artist"))
+        track = self.text_value(trackdata.get("name"))
+        if not artist or not track:
+            self.malformed_lastfm_response(irc, 'user.getrecenttracks')
 
-        try:
-            data = json.loads(f)["recenttracks"]
-        except KeyError:
-            irc.error("Unknown user %s." % user, Raise=True)
-
-        user = data["@attr"]["user"]
-        tracks = data["track"]
-
-        # Work with only the first track.
-        try:
-            trackdata = tracks[0]
-        except IndexError:
-            irc.error("%s doesn't seem to have listened to anything." % user, Raise=True)
-
-        artist = trackdata["artist"]["#text"].strip()  # Artist name
-        track = trackdata["name"].strip()  # Track name
-        # Album name (may or may not be present)
-        album = trackdata["album"]["#text"].strip()
         tags = self.get_artist_tags(artist, irc)
+        tags = [tag for tag in tags if tag.lower() != 'seen live']
+        tag_list = ', '.join(tags)
 
-        url_track = "%sapi_key=%s&method=track.getInfo&user=%s&artist=%s&track=%s&format=json" \
-                % (self.APIURL, apiKey, user, parse.quote(artist), parse.quote(track))
-
-        try:
-            ans = utils.web.getUrl(url_track).decode("utf-8")
-        except:
-            pass
-
-        try:
-            data_track = json.loads(ans)["track"]
-        except:
-            pass
+        data_track = self.get_track_info(irc, user, artist, track)
+        playcount = self.text_value(data_track.get("userplaycount"))
+        if playcount:
+            playcount += "x"
 
         try:
-            playcount = data_track["userplaycount"].strip() + "x"
-        except:
-            playcount = ""
-
-        try:
-            tags.remove('seen live') # remove ce tag de merde
-        except:
-            pass
-
-        try:
-            tag_list = ', '.join(tags)
-        except TypeError:
-            tag_list = ''
-
-        try:
-            time = int(trackdata["date"]["uts"])  # Time of last listen
-            # Format this using the preferred time format.
-            tformat = conf.supybot.reply.format.time()
-            time = "%s" % humanize.naturaltime(datetime.now() - datetime.fromtimestamp(time))
-        except KeyError:  # Nothing given by the API?
+            timestamp = int(trackdata["date"]["uts"])
+            time = "%s" % humanize.naturaltime(
+                datetime.now() - datetime.fromtimestamp(timestamp))
+        except (KeyError, TypeError, ValueError):
             time = ""
 
         public_url = ''
         if self.registryValue("fetchYouTubeLink"):
-            try:
-                search_response = self.youtube.search().list(
-                    q=f"{artist} {track}",
-                    part="id",
-                    maxResults=5,          # grab a handful, we’ll pick the first video
-                    type="video"           # still ask for videos only
-                ).execute()
-            except HttpError as e:
-                log.warning("YouTube API error %s: %s", e.resp.status, e.content)
-                search_response = {}
-            except BrokenPipeError as e:
-                log.warning("YouTube API error: %s", e)
-                search_response = {}
-
-            video_id = None
-            for item in search_response.get("items", []):
-                id_info = item.get("id", {})
-                if id_info.get("kind") == "youtube#video" and "videoId" in id_info:
-                    video_id = id_info["videoId"]
-                    break
-
-            if video_id:
-                public_url = f"https://youtu.be/{video_id}"
+            public_url = self.get_youtube_link(artist, track)
 
         response = [artist, track, tag_list, public_url, time, playcount]
         s = ' \u2014 '.join(filter(None, response))
 
         irc.reply(utils.str.normalizeWhitespace(s))
 
-
     @wrap
     def wp(self, irc, msg, args):
         """[]
         Announces the track currently being played by current channel users.
         """
-        apiKey = self.get_apiKey(irc)
+        self.get_apiKey(irc)
         channel = msg.args[0]
         L = list(irc.state.channels[channel].users)
         wp_data = []
@@ -349,45 +416,21 @@ class LastFM(callbacks.Plugin):
         for nick in L:
             hostmask = irc.state.nickToHostmask(nick)
             user = self.db.get(hostmask)
-            if user:
-            # see http://www.lastfm.de/api/show/user.getrecenttracks
-                url = "%sapi_key=%s&method=user.getrecenttracks&user=%s&format=json" % (self.APIURL, apiKey, user)
-                try:
-                    f = utils.web.getUrl(url).decode("utf-8")
-                except utils.web.Error:
-                    continue
-#                    irc.error("Unknown user %s." % user, Raise=True)
-                self.log.debug("LastFM.nowPlaying: url %s", url)
+            if not user:
+                continue
 
-                try:
-                    data = json.loads(f)["recenttracks"]
-                except KeyError:
-                    continue
-#                    irc.error("Unknown user %s." % user, Raise=True)
+            trackdata, _ = self.get_recent_track(irc, user, quiet=True)
+            if not trackdata or "date" in trackdata:
+                continue
 
-                user = data["@attr"]["user"]
-                tracks = data["track"]
+            artist = self.text_value(trackdata.get("artist"))
+            track = self.text_value(trackdata.get("name"))
+            if not artist or not track:
+                self.malformed_lastfm_response(irc, 'user.getrecenttracks', quiet=True)
+                continue
 
-                # Work with only the first track.
-                try:
-                    trackdata = tracks[0]
-                except IndexError:
-                    irc.error("%s doesn't seem to have listened to anything." % user, Raise=True)
-
-                artist = trackdata["artist"]["#text"].strip()  # Artist name
-                track = trackdata["name"].strip()  # Track name
-                # Album name (may or may not be present)
-                album = trackdata["album"]["#text"].strip()
-                if album:
-                    album = ircutils.bold("[%s]" % album)
-
-                try:
-                    time = int(trackdata["date"]["uts"])  # Time of last listen
-                except KeyError:
-                    # Nothing given by the API = now playing,
-                    # this is what we want
-                    nickquiet = nick[0] + u"\u2063" + nick[1:]
-                    wp_data.append({'nick': nickquiet, 'artist': artist, 'track': track})
+            nickquiet = nick[0] + u"\u2063" + nick[1:]
+            wp_data.append({'nick': nickquiet, 'artist': artist, 'track': track})
 
         if not wp_data:
             s = "No one is playing anything right now."
@@ -395,11 +438,9 @@ class LastFM(callbacks.Plugin):
         else:
             user_max_length = min(max(len(item['nick']) for item in wp_data), 25)
             artist_max_length = min(max(len(item['artist']) for item in wp_data), 40)
-            s = ""
             for wp_user in wp_data:
                 s = f"{wp_user['nick'].ljust(user_max_length)[:user_max_length]}  {wp_user['artist'].ljust(artist_max_length)[:artist_max_length]}  {wp_user['track']}"
                 irc.reply(s, prefixNick=False)
-
 
     @wrap(["something"])
     def set(self, irc, msg, args, newId):
@@ -409,8 +450,7 @@ class LastFM(callbacks.Plugin):
         """
 
         self.db.set(msg.prefix, newId)
-        irc.reply("you are now http://www.last.fm/user/%s" % newId)
-
+        irc.reply("you are now https://www.last.fm/user/%s" % newId)
 
     @wrap([optional("something"), optional("something")])
     def topartists(self, irc, msg, args, duration, user):
@@ -418,18 +458,19 @@ class LastFM(callbacks.Plugin):
 
         Reports the top 10 artists for the current user (or the one specified). Duration: overall | 7day | 1month | 3month | 6month | 12month (default: 6 months)
         """
-        #irc.error("This command is not ready yet. Stay tuned!", Raise=True)
         nick, user = self.get_user(msg, user, irc)
         artists, duration, duration_dict = self.get_topartists(irc, msg, user, duration)
-        outstr = "%s's top artists %s are:" % (nick, duration_dict[duration])
+        if not artists:
+            irc.reply("No top artists for %s" % nick)
+            return
 
+        outstr = "%s's top artists %s are:" % (nick, duration_dict[duration])
         for artist in artists:
             outstr = outstr + (" %s [%s]," % (ircutils.bold(artist['name']), artist['playcount']))
 
         outstr = outstr[:-1]
 
         irc.reply(outstr)
-
 
     @wrap([optional("something"), optional("something")])
     def toptags(self, irc, msg, args, user, duration):
@@ -439,29 +480,19 @@ class LastFM(callbacks.Plugin):
         """
 
         nick, user = self.get_user(msg, user, irc)
-        # Get topartists and then get their tags
         artists, duration, duration_dict = self.get_topartists(irc, msg, user, duration)
         tags = []
         for artist in artists:
-            try:
-                tags += self.get_artist_tags(artist['name'], irc)
-            except:
-                pass
+            tags += self.get_artist_tags(artist['name'], irc)
 
+        tags = [tag.lower() for tag in tags if tag.lower() != 'seen live']
         if not tags:
             irc.reply('No top tags for {}'.format(nick))
             return
 
-        # Count each tag's occurence
-        tags = [tag.lower() for tag in tags]
-        try:
-            tags.remove('seen live') # remove ce tag de merde
-        except:
-            pass
         counts = [[tag, tags.count(tag)] for tag in set(tags)]
         counts = sorted(counts, key=lambda x: -x[1])
 
-        # And build the string
         outstr = "{nick}'s top tags {duration} are:".format(nick=nick, duration=duration_dict[duration])
         for tag, count in counts[:10]:
             outstr += ' {tag} [{count}],'.format(tag=tag.title(), count=count)

@@ -100,28 +100,43 @@ class SpiffyTitlesTestCase(ChannelPluginTestCase):
         plugin = self.irc.getCallback('SpiffyTitles')
 
         self.assertEqual(plugin.get_numbered_title_response(['^ First', 'Second']),
-                         '[1] First | [2] Second')
+                         '[1] First [2] Second')
 
     def testNumberedTitleResponsePreservesOriginalUrlIndexes(self):
         plugin = self.irc.getCallback('SpiffyTitles')
 
         self.assertEqual(
             plugin.get_numbered_title_response([(2, '^ Second'), (4, 'Fourth')]),
-            '[2] Second | [4] Fourth')
+            '[2] Second [4] Fourth')
 
-    def testMultiUrlMessagePreservesIndexWhenFirstUrlFails(self):
+    def testMultiUrlMessagePreservesIndexWhenMiddleUrlFails(self):
         plugin = self.irc.getCallback('SpiffyTitles')
 
         with patch.object(plugin, 'get_title_by_message_url',
-                          side_effect=[None, '^ Amazon.fr']):
+                          side_effect=['^ Google', None,
+                                       '^ by Amazon Spaghetti Au Blé Complet']):
             titles = plugin.get_titles_by_urls([
+                'https://google.com',
                 'https://dead.example',
                 'https://www.amazon.fr/dp/B0CTH7CVGB',
             ], self.channel)
 
-        self.assertEqual(titles, [(2, '^ Amazon.fr')])
+        self.assertEqual(titles, [
+            (1, '^ Google'),
+            (2, '^ <bad url>'),
+            (3, '^ by Amazon Spaghetti Au Blé Complet'),
+        ])
         self.assertEqual(plugin.get_numbered_title_response(titles),
-                         '[2] Amazon.fr')
+                         '[1] Google [2] <bad url> [3] by Amazon Spaghetti Au Blé Complet')
+
+    def testSingleBadUrlStaysQuiet(self):
+        plugin = self.irc.getCallback('SpiffyTitles')
+
+        with patch.object(plugin, 'get_title_by_message_url',
+                          return_value=None):
+            self.assertEqual(plugin.get_titles_by_urls([
+                'https://dead.example',
+            ], self.channel), [])
 
     def testDeadDefaultUrlDoesNotLogAsError(self):
         plugin = self.irc.getCallback('SpiffyTitles')

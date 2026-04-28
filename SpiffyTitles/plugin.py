@@ -68,6 +68,7 @@ class SpiffyTitles(callbacks.Plugin):
     wall_clock_timeout = 8
     max_request_retries = 3
     imgur_client = None
+    bad_url_title = "^ <bad url>"
 
     def __init__(self, irc):
         self.__parent = super(SpiffyTitles, self)
@@ -519,15 +520,18 @@ class SpiffyTitles(callbacks.Plugin):
 
     def get_titles_by_urls(self, urls, channel):
         """
-        Return every usable title from the URLs in a message.
+        Return every visible title from the URLs in a message.
         """
         titles = []
+        include_bad_urls = len(urls) > 1
 
         for index, url in enumerate(urls, start=1):
             title = self.get_title_by_message_url(url, channel)
 
             if title is not None and title:
                 titles.append((index, title))
+            elif include_bad_urls:
+                titles.append((index, self.bad_url_title))
 
         return titles
 
@@ -561,7 +565,7 @@ class SpiffyTitles(callbacks.Plugin):
         """
         Format multiple titles as a single, numbered IRC response.
         """
-        return " | ".join("[%s] %s" % (
+        return " ".join("[%s] %s" % (
             self.get_number_from_numbered_entry(entry, i + 1),
             self.strip_title_prefix(self.get_title_from_numbered_entry(entry)))
             for i, entry in enumerate(titles))

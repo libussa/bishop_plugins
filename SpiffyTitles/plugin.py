@@ -17,6 +17,8 @@ try:
     from urllib.parse import urlparse, parse_qsl, parse_qs
 except ImportError:
     from urllib.parse import urlencode, urlparse, parse_qsl, parse_qs
+from urllib import error as urllib_error
+from urllib import request as urllib_request
 from bs4 import BeautifulSoup
 import random
 import json
@@ -50,7 +52,6 @@ class SpiffyTitles(callbacks.Plugin):
     link_cache = []
     handlers = {}
     handler_whitelist_aliases = {
-        "handler_amazon": set(["amazon"]),
         "handler_apl": set(["apl", "gazelle", "orpheus"]),
         "handler_coub": set(["coub"]),
         "handler_dailymotion": set(["dailymotion"]),
@@ -89,7 +90,6 @@ class SpiffyTitles(callbacks.Plugin):
         self.add_dailymotion_handlers()
         self.add_wikipedia_handlers()
         self.add_reddit_handlers()
-        self.add_amazon_handlers()
         self.add_gazelle_handlers()
 
     def add_dailymotion_handlers(self):
@@ -109,21 +109,6 @@ class SpiffyTitles(callbacks.Plugin):
     def add_reddit_handlers(self):
         self.handlers["reddit.com"] = self.handler_reddit
         self.handlers["www.reddit.com"] = self.handler_reddit
-
-    def add_amazon_handlers(self):
-        for domain in (
-                "amazon.fr", "www.amazon.fr",
-                "amazon.de", "www.amazon.de",
-                "amazon.com", "www.amazon.com",
-                "amazon.co.uk", "www.amazon.co.uk",
-                "amazon.it", "www.amazon.it",
-                "amazon.es", "www.amazon.es",
-                "amazon.nl", "www.amazon.nl",
-                "amazon.se", "www.amazon.se",
-                "amazon.pl", "www.amazon.pl",
-                "amazon.ca", "www.amazon.ca"):
-            self.handlers[domain] = self.handler_amazon
-
 
     def add_gazelle_handlers(self):
         config_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'gazelle.conf')
@@ -1070,92 +1055,6 @@ class SpiffyTitles(callbacks.Plugin):
         else:
             log.debug("SpiffyTitles: default handler fired but doing nothing because disabled")
 
-    def handler_amazon(self, url, info, channel):
-        """
-        Amazon often uses a generic <title>. Prefer product metadata when the
-        product page HTML is available.
-        """
-        default_handler_enabled = self.registryValue("defaultHandlerEnabled", channel=channel)
-
-        if not default_handler_enabled:
-            return
-
-        log.debug("SpiffyTitles: calling Amazon handler for %s" % (url))
-        default_template = Template(self.registryValue("defaultTitleTemplate", channel=channel))
-        (html, is_redirect, real_domain) = self.get_source_by_url(url)
-
-        if html is not None and html:
-            title = self.get_amazon_title_from_html(html)
-            if title is None:
-                title = self.get_title_from_html(html)
-
-            if title is not None:
-                return default_template.render(
-                    title=title, redirect=is_redirect, real_domain=real_domain)
-
-    def get_amazon_title_from_html(self, html):
-        soup = BeautifulSoup(html, "lxml")
-        if soup is None:
-            return
-
-        for selector in (
-                "#productTitle",
-                "#title #productTitle",
-                "#ebooksProductTitle",
-                "#btAsinTitle"):
-            match = soup.select_one(selector)
-            if match:
-                title = match.get_text(" ", strip=True)
-                if title:
-                    return title
-
-        for attrs in (
-                {"property": "og:title"},
-                {"name": "title"},
-                {"name": "twitter:title"}):
-            match = soup.find("meta", attrs=attrs)
-            if match and match.get("content"):
-                title = match["content"].strip()
-                if title and not self.is_generic_amazon_title(title):
-                    return title
-
-        for script in soup.find_all("script", type="application/ld+json"):
-            try:
-                data = json.loads(script.string or "")
-            except ValueError:
-                continue
-            title = self.get_product_name_from_jsonld(data)
-            if title:
-                return title
-
-    def get_product_name_from_jsonld(self, data):
-        if isinstance(data, list):
-            for item in data:
-                title = self.get_product_name_from_jsonld(item)
-                if title:
-                    return title
-        elif isinstance(data, dict):
-            graph = data.get("@graph")
-            if graph:
-                title = self.get_product_name_from_jsonld(graph)
-                if title:
-                    return title
-
-            type_value = data.get("@type")
-            if isinstance(type_value, list):
-                is_product = "Product" in type_value
-            else:
-                is_product = type_value == "Product"
-            name = data.get("name")
-            if is_product and isinstance(name, str) and name.strip():
-                return name.strip()
-
-    def is_generic_amazon_title(self, title):
-        return title.strip().lower() in {
-            "amazon.fr", "amazon.de", "amazon.com", "amazon.co.uk",
-            "amazon.it", "amazon.es", "amazon.nl", "amazon.se",
-            "amazon.pl", "amazon.ca"}
-
     def handler_imdb(self, url, info, channel):
         """
         Handles imdb.com links, querying IMDb suggestions for additional info
@@ -1626,7 +1525,7 @@ class SpiffyTitles(callbacks.Plugin):
     @timeout_decorator.timeout(wall_clock_timeout)
     def get_source_by_url(self, url, retries=1):
         """
-        Get the HTML of a website based on a URL
+        Get the HTML of a website based on a URL.
         """
         max_retries = self.registryValue("maxRetries")
 
@@ -1638,37 +1537,34 @@ class SpiffyTitles(callbacks.Plugin):
 
             return (None, False, None)
 
-        log.debug("SpiffyTitles: attempt #%s for %s" % (retries, url))
+        if not urlparse(url).scheme:
+            return self.get_source_by_url("http://%s" % url)
+
+        log.debug("SpiffyTitles: urllib attempt #%s for %s" % (retries, url))
 
         try:
             headers = self.get_headers()
-
-            log.debug("SpiffyTitles: requesting %s" % (url))
-
-            request = requests.get(url, headers=headers, timeout=10, allow_redirects=True)
-
+            request = urllib_request.Request(url, headers=headers)
+            response = urllib_request.urlopen(request, timeout=10)
+            final_url = response.geturl()
+            status_code = response.getcode()
             is_redirect = False
             real_domain = None
-            if request.history:
-                # check the top two domain levels
-                link_domain = self.get_base_domain(request.history[0].url)
-                real_domain = self.get_base_domain(request.url)
-                if link_domain != real_domain:
-                    is_redirect = True
 
-                for redir in request.history:
-                    log.debug("SpiffyTitles: Redirect %s from %s" % (redir.status_code, redir.url))
-                log.debug("SpiffyTitles: Final url %s" % (request.url))
+            link_domain = self.get_base_domain(url)
+            final_domain = self.get_base_domain(final_url)
+            if link_domain != final_domain:
+                is_redirect = True
+                real_domain = final_domain
 
-            if request.status_code == requests.codes.ok:
-                # Check the content type which comes in the format: "text/html; charset=UTF-8"
-                content_type = request.headers.get("content-type").split(";")[0].strip()
+            if status_code == requests.codes.ok:
+                content_type = (response.headers.get("content-type") or "").split(";")[0].strip()
                 acceptable_types = self.registryValue("mimeTypes")
 
                 log.debug("SpiffyTitles: content type %s" % (content_type))
 
                 if content_type in acceptable_types:
-                    text = request.content
+                    text = response.read()
 
                     if text:
                         return (text, is_redirect, real_domain)
@@ -1679,26 +1575,22 @@ class SpiffyTitles(callbacks.Plugin):
                     log.debug("SpiffyTitles: unacceptable mime type %s for url %s" %
                               (content_type, url))
             else:
-                log.error("SpiffyTitles HTTP response code %s - %s" % (request.status_code,
-                                                                       request.content))
+                log.error("SpiffyTitles HTTP response code %s - %s" %
+                          (status_code, response.read()))
 
         except timeout_decorator.TimeoutError:
             log.debug("SpiffyTitles: wall timeout for %s", url)
 
             return self.get_source_by_url(url, retries + 1)
-        except requests.exceptions.MissingSchema as e:
-            url_wschema = "http://%s" % (url)
-            log.error("SpiffyTitles missing schema. Retrying with %s" % (url_wschema))
-            return self.get_source_by_url(url_wschema)
-        except requests.exceptions.Timeout as e:
+        except TimeoutError as e:
             log.debug("SpiffyTitles Timeout: %s" % (str(e)))
 
             return self.get_source_by_url(url, retries + 1)
-        except requests.exceptions.ConnectionError as e:
+        except urllib_error.HTTPError as e:
+            log.error("SpiffyTitles HTTP response code %s - %s" % (e.code, e.read()))
+        except urllib_error.URLError as e:
             log.debug("SpiffyTitles ConnectionError: %s" % (str(e)))
-        except requests.exceptions.HTTPError as e:
-            log.error("SpiffyTitles HTTPError: %s" % (str(e)))
-        except requests.exceptions.InvalidURL as e:
+        except ValueError as e:
             log.error("SpiffyTitles InvalidURL: %s" % (str(e)))
 
         return (None, False, None)

@@ -922,7 +922,7 @@ class SpiffyTitles(callbacks.Plugin):
         4 minutes and 41 seconds. This method returns the total seconds
         so that the duration can be parsed as usual.
         """
-        regex = re.compile("""
+        regex = re.compile(r"""
                    (?P<sign>    -?) P
                 (?:(?P<years>  \d+) Y)?
                 (?:(?P<months> \d+) M)?

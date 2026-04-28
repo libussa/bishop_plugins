@@ -40,3 +40,14 @@ Showing current channel listeners:
 <@GLolol> %wp
 <@Atlas> R⁣J  The Shadows  Apache
 ```
+
+Showing top artists or tags:
+```
+<@GLolol> %topartists RJ 7day
+<@Atlas> RJ's top artists for the last week are: The Shadows [42]
+<@GLolol> %toptags 7day RJ
+<@Atlas> RJ's top tags for the last week are: Instrumental [4], Surf Rock [2]
+```
+Like `%np`, the user argument first checks registered nicks in the current
+channel, then falls back to a LastFM username. The duration and user may be
+given in either order.

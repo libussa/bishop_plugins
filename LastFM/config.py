@@ -43,7 +43,8 @@ def configure(advanced):
 
 LastFM = conf.registerPlugin('LastFM')
 conf.registerGlobalValue(LastFM, 'apiKey',
-     registry.String('', """Sets the API key for this plugin: http://www.last.fm/api/account/create""", private=True))
+     registry.String('', """Sets the API key for this plugin:
+        https://www.last.fm/api/account/create""", private=True))
 conf.registerGlobalValue(LastFM, 'youtubeApiKey',
      registry.String('', """Sets the Youtube API key""", private=True))
 conf.registerChannelValue(LastFM, "fetchYouTubeLink",

@@ -31,8 +31,12 @@
 
 from supybot.test import *
 import json
+import os
+import tempfile
 from urllib import parse
 from unittest.mock import patch
+from apiclient.errors import HttpError
+from LastFM.plugin import LastFMDB
 import supybot.irclib as irclib
 import supybot.utils as utils
 
@@ -52,6 +56,37 @@ def recent_track_payload(artist="Artist & Co", track="Song + Tune"):
             }],
         },
     }
+
+
+def topartists_payload(*artists):
+    return {
+        "topartists": {
+            "artist": [
+                {"name": name, "playcount": str(playcount)}
+                for name, playcount in artists
+            ],
+        },
+    }
+
+
+class FakeHttpResponse(dict):
+    status = 403
+    reason = "Forbidden"
+
+
+class FailingYouTube:
+    def __init__(self, counter):
+        self.counter = counter
+
+    def search(self):
+        return self
+
+    def list(self, **kwargs):
+        return self
+
+    def execute(self):
+        self.counter["execute"] += 1
+        raise HttpError(FakeHttpResponse(), b'{"error": {"status": "denied"}}')
 
 
 class LastFMTestCase(PluginTestCase):
@@ -80,6 +115,27 @@ class LastFMTestCase(PluginTestCase):
         if lastfm_user is not None:
             plugin = self.irc.getCallback('LastFM')
             plugin.db.set(hostmask, lastfm_user)
+
+    def set_lastfm_user(self, prefix, lastfm_user):
+        plugin = self.irc.getCallback('LastFM')
+        plugin.db.set(prefix, lastfm_user)
+
+    def testDatabaseCorruptionIsNotOverwritten(self):
+        fd, path = tempfile.mkstemp()
+        try:
+            with os.fdopen(fd, 'wb') as f:
+                f.write(b'not a pickle')
+
+            db = LastFMDB(path)
+            self.assertEqual(db.db, {})
+            self.assertFalse(db.flush_enabled)
+            db.db["user"] = "lastfm-user"
+            db.flush()
+
+            with open(path, 'rb') as f:
+                self.assertEqual(f.read(), b'not a pickle')
+        finally:
+            os.remove(path)
 
     def testNowPlaying(self):
         def track_info(query):
@@ -163,6 +219,115 @@ class LastFMTestCase(PluginTestCase):
         with patch('LastFM.plugin.utils.web.getUrl',
                    side_effect=self.lastfm_get_url(handlers)):
             self.assertResponse("np krf", "Artist \u2014 Track")
+
+    def testYoutubeHttpErrorDisablesFurtherYoutubeLookups(self):
+        conf.supybot.plugins.LastFM.fetchYouTubeLink.setValue(True)
+        conf.supybot.plugins.LastFM.youtubeApiKey.setValue('bad-key')
+        counter = {"execute": 0}
+        handlers = {
+            "user.getrecenttracks": lambda query: recent_track_payload(
+                artist="Artist", track="Track"),
+            "artist.getinfo": lambda query: {"artist": {"tags": {"tag": []}}},
+            "track.getInfo": lambda query: {"track": {}},
+        }
+
+        with patch('LastFM.plugin.build',
+                   return_value=FailingYouTube(counter)):
+            with patch('LastFM.plugin.utils.web.getUrl',
+                       side_effect=self.lastfm_get_url(handlers)):
+                self.assertResponse("np krf", "Artist \u2014 Track")
+                self.assertResponse("np krf", "Artist \u2014 Track")
+
+        self.assertEqual(counter["execute"], 1)
+
+    def testWhoPlayingSkipsUsersWithoutHostmasks(self):
+        state = self.irc.state.channels.setdefault(
+            "#test", irclib.ChannelState())
+        state.addUser("Ghost")
+
+        self.assertResponse("@wp", "No one is playing anything right now.",
+                            to="#test")
+
+    def testTopartistsUsesCurrentUserByDefault(self):
+        self.set_lastfm_user(self.prefix, "caller_lfm")
+
+        def topartists(query):
+            self.assertEqual(query["user"], ["caller_lfm"])
+            self.assertEqual(query["period"], ["6month"])
+            return topartists_payload(("Rocker", 9))
+
+        handlers = {"user.gettopartists": topartists}
+
+        with patch('LastFM.plugin.utils.web.getUrl',
+                   side_effect=self.lastfm_get_url(handlers)):
+            self.assertResponse(
+                "topartists",
+                "test's top artists for the last 6 months are: "
+                "\x02Rocker\x02 [9]")
+
+    def testTopartistsResolvesRegisteredChannelNick(self):
+        self.add_channel_user("#test", "Alice", "alice_lfm")
+
+        def topartists(query):
+            self.assertEqual(query["user"], ["alice_lfm"])
+            self.assertEqual(query["period"], ["7day"])
+            return topartists_payload(("Rocker", 9))
+
+        handlers = {"user.gettopartists": topartists}
+
+        with patch('LastFM.plugin.utils.web.getUrl',
+                   side_effect=self.lastfm_get_url(handlers)):
+            self.assertResponse(
+                "@topartists Alice 7day",
+                "test: Alice's top artists for the last week are: "
+                "\x02Rocker\x02 [9]",
+                to="#test")
+
+    def testTopartistsAcceptsDurationBeforeUser(self):
+        self.add_channel_user("#test", "Alice", "alice_lfm")
+
+        def topartists(query):
+            self.assertEqual(query["user"], ["alice_lfm"])
+            self.assertEqual(query["period"], ["7day"])
+            return topartists_payload(("Rocker", 9))
+
+        handlers = {"user.gettopartists": topartists}
+
+        with patch('LastFM.plugin.utils.web.getUrl',
+                   side_effect=self.lastfm_get_url(handlers)):
+            self.assertResponse(
+                "@topartists 7day Alice",
+                "test: Alice's top artists for the last week are: "
+                "\x02Rocker\x02 [9]",
+                to="#test")
+
+    def testToptagsResolvesRegisteredChannelNick(self):
+        self.add_channel_user("#test", "Alice", "alice_lfm")
+
+        def topartists(query):
+            self.assertEqual(query["user"], ["alice_lfm"])
+            self.assertEqual(query["period"], ["7day"])
+            return topartists_payload(("Artist A", 3), ("Artist B", 2))
+
+        def artist_info(query):
+            tags = {
+                "Artist A": [{"name": "indie"}, {"name": "seen live"}],
+                "Artist B": [{"name": "indie"}, {"name": "rock"}],
+            }
+            return {"artist": {"tags": {"tag": tags[query["artist"][0]]}}}
+
+        handlers = {
+            "user.gettopartists": topartists,
+            "artist.getinfo": artist_info,
+        }
+
+        with patch('LastFM.plugin.utils.web.getUrl',
+                   side_effect=self.lastfm_get_url(handlers)):
+            self.assertResponse(
+                "@toptags Alice 7day",
+                "test: Alice's top tags for the last week are: "
+                "Indie [2], Rock [1]",
+                to="#test")
 
     def testNowPlayingReturnsLastfmApiErrorsToIrc(self):
         handlers = {

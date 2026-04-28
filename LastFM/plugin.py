@@ -40,6 +40,7 @@ import supybot.world as world
 import supybot.log as log
 import supybot.ircdb as ircdb
 
+from collections import Counter
 import json
 from datetime import datetime
 import pickle
@@ -65,16 +66,26 @@ class LastFMDB():
         exists.
         """
         self.filename = filename
+        self.flush_enabled = True
         self.db = {}
         try:
             with open(self.filename, 'rb') as f:
-                self.db = pickle.load(f)
-        except Exception as e:
-            log.debug('LastFM: Unable to load database, creating '
-                      'a new one: %s', e)
+                db = pickle.load(f)
+            if not isinstance(db, dict):
+                raise ValueError("database did not contain a dict")
+            self.db = db
+        except FileNotFoundError:
+            log.debug('LastFM: database does not exist yet, creating a new one')
+        except (EOFError, pickle.PickleError, AttributeError, TypeError,
+                ValueError, OSError) as e:
+            self.flush_enabled = False
+            log.warning('LastFM: unable to load database %s; keeping it '
+                        'untouched: %s', self.filename, e)
 
     def flush(self):
         """Exports the database to a file."""
+        if not self.flush_enabled:
+            return
         try:
             with open(self.filename, 'wb') as f:
                 pickle.dump(self.db, f, 2)
@@ -109,6 +120,13 @@ class LastFMDB():
 
 class LastFM(callbacks.Plugin):
     threaded = True
+    duration_labels = {
+            'overall' : 'since forever',
+            '7day'    : 'for the last week',
+            '1month'  : 'for the last month',
+            '3month'  : 'for the last 3 months',
+            '6month'  : 'for the last 6 months',
+            '12month' : 'for the last year'}
 
     def __init__(self, irc):
         self.__parent = super(LastFM, self)
@@ -120,10 +138,7 @@ class LastFM(callbacks.Plugin):
         self.APIURL = "https://ws.audioscrobbler.com/2.0/?"
         self.youtube = None
         self.youtube_api_key = None
-
-        # max length of fields for wp
-        self.user_max_length = 16
-        self.artist_max_length = 20
+        self.youtube_disabled_api_key = None
 
     def die(self):
         world.flushers.remove(self.db.flush)
@@ -206,24 +221,6 @@ class LastFM(callbacks.Plugin):
             return ''
         return str(value).strip()
 
-    def get_user(self, msg, user, irc):
-        if user is not None:
-            nick = user
-            try:
-                hostmask = irc.state.nickToHostmask(user)
-            except KeyError:
-                irc.error("%s is not registered with the bot" % user, Raise=True)
-            userx = self.db.get(hostmask)
-            if userx is None:
-                irc.error("%s is not registered with the bot" % user, Raise=True)
-            return nick, userx
-
-        nick = msg.nick
-        user = self.db.get(msg.prefix)
-        if user is None:
-            irc.error("use .set <LastFM username> first.", Raise=True)
-        return nick, user
-
     def get_artist_tags(self, artist, irc):
         data = self.lastfm_request(
             irc, 'artist.getinfo', quiet=True, artist=artist)
@@ -252,23 +249,7 @@ class LastFM(callbacks.Plugin):
             self.malformed_lastfm_response(irc, 'track.getInfo', quiet=True)
             return {}
 
-    def get_topartists(self, irc, msg, user, duration):
-        valid_durations = ['overall', '7day', '1month', '3month', '6month', '12month']
-        if duration is None:
-            duration = '6month'
-        elif duration not in valid_durations:
-            irc.reply("Duration must be one of: overall | 7day | 1month | "
-                      "3month | 6month | 12month. Using default.")
-            duration = "6month"
-
-        duration_dict = {
-                'overall' : 'since forever',
-                '7day'    : 'for the last week',
-                '1month'  : 'for the last month',
-                '3month'  : 'for the last 3 months',
-                '6month'  : 'for the last 6 months',
-                '12month' : 'for the last year'}
-
+    def get_topartists(self, irc, user, duration):
         data = self.lastfm_request(
             irc, 'user.gettopartists', user=user, limit=10, period=duration)
         try:
@@ -285,7 +266,7 @@ class LastFM(callbacks.Plugin):
             if name and playcount:
                 artists.append({'name': name, 'playcount' : playcount})
 
-        return artists, duration, duration_dict
+        return artists
 
     def get_recent_track(self, irc, user, quiet=False):
         data = self.lastfm_request(
@@ -317,7 +298,11 @@ class LastFM(callbacks.Plugin):
     def get_youtube_client(self):
         youtubeApiKey = self.registryValue("youtubeApiKey")
         if not youtubeApiKey:
-            self.log.warning("LastFM: fetchYouTubeLink is enabled but youtubeApiKey is not set")
+            self.disable_youtube(
+                youtubeApiKey, "fetchYouTubeLink is enabled but youtubeApiKey is not set")
+            return None
+
+        if self.youtube_disabled_api_key == youtubeApiKey:
             return None
 
         if self.youtube is None or self.youtube_api_key != youtubeApiKey:
@@ -326,16 +311,34 @@ class LastFM(callbacks.Plugin):
                     "youtube", "v3", developerKey=youtubeApiKey,
                     cache_discovery=False)
                 self.youtube_api_key = youtubeApiKey
+                self.youtube_disabled_api_key = None
             except Exception as e:
-                self.log.warning("LastFM: unable to initialize YouTube API client: %s", e)
-                self.youtube = None
-                self.youtube_api_key = None
+                self.disable_youtube(
+                    youtubeApiKey, "unable to initialize YouTube API client: %s" % e)
         return self.youtube
+
+    def disable_youtube(self, api_key, reason):
+        if self.youtube_disabled_api_key != api_key:
+            self.log.warning(
+                "LastFM: disabling YouTube links for current API key: %s", reason)
+        self.youtube = None
+        self.youtube_api_key = None
+        self.youtube_disabled_api_key = api_key
+
+    def youtube_http_error(self, error):
+        status = getattr(error.resp, 'status', 'unknown')
+        reason = getattr(error, 'reason', None)
+        if reason is None:
+            reason = getattr(error.resp, 'reason', None)
+        if reason is None:
+            reason = 'HTTP error'
+        return "HTTP %s: %s" % (status, reason)
 
     def get_youtube_link(self, artist, track):
         youtube = self.get_youtube_client()
         if youtube is None:
             return ''
+        youtubeApiKey = self.youtube_api_key
 
         try:
             search_response = youtube.search().list(
@@ -345,13 +348,14 @@ class LastFM(callbacks.Plugin):
                 type="video"
             ).execute()
         except HttpError as e:
-            self.log.warning("YouTube API error %s: %s", e.resp.status, e.content)
+            self.disable_youtube(
+                youtubeApiKey, "YouTube API error %s" % self.youtube_http_error(e))
             return ''
         except BrokenPipeError as e:
-            self.log.warning("YouTube API error: %s", e)
+            self.disable_youtube(youtubeApiKey, "YouTube API error: %s" % e)
             return ''
         except Exception as e:
-            self.log.warning("YouTube API error: %s", e)
+            self.disable_youtube(youtubeApiKey, "YouTube API error: %s" % e)
             return ''
 
         for item in search_response.get("items", []):
@@ -361,6 +365,12 @@ class LastFM(callbacks.Plugin):
         return ''
 
     def get_channel_user(self, irc, channel, nick):
+        resolved = self.resolve_channel_user(irc, channel, nick)
+        if resolved is None:
+            return None
+        return resolved[1]
+
+    def resolve_channel_user(self, irc, channel, nick):
         if not irc.isChannel(channel):
             return None
 
@@ -382,7 +392,10 @@ class LastFM(callbacks.Plugin):
         except KeyError:
             return None
 
-        return self.db.get(hostmask)
+        user = self.db.get(hostmask)
+        if not user:
+            return None
+        return channel_nick, user
 
     def get_np_user(self, irc, msg, user):
         if user is None:
@@ -395,6 +408,37 @@ class LastFM(callbacks.Plugin):
         if channel_user:
             return channel_user
         return user
+
+    def parse_user_duration(self, irc, tokens):
+        if len(tokens) > 2:
+            irc.error("Usage: [<nick|LastFM user>] [<duration>]", Raise=True)
+
+        user = None
+        duration = None
+        for token in tokens:
+            normalized = token.lower()
+            if normalized in self.duration_labels:
+                if duration is not None:
+                    irc.error("Only one duration may be given.", Raise=True)
+                duration = normalized
+            else:
+                if user is not None:
+                    irc.error("Only one LastFM user may be given.", Raise=True)
+                user = token
+
+        return user, duration or '6month'
+
+    def resolve_display_user(self, irc, msg, user):
+        if user is None:
+            user = self.db.get(msg.prefix)
+            if user is None:
+                irc.error("use .set <LastFM username> first.", Raise=True)
+            return msg.nick, user
+
+        resolved = self.resolve_channel_user(irc, msg.args[0], user)
+        if resolved is not None:
+            return resolved
+        return user, user
 
     @wrap([optional("something")])
     def np(self, irc, msg, args, user):
@@ -450,8 +494,7 @@ class LastFM(callbacks.Plugin):
         wp_data = []
 
         for nick in L:
-            hostmask = irc.state.nickToHostmask(nick)
-            user = self.db.get(hostmask)
+            user = self.get_channel_user(irc, channel, nick)
             if not user:
                 continue
 
@@ -475,7 +518,9 @@ class LastFM(callbacks.Plugin):
             user_max_length = min(max(len(item['nick']) for item in wp_data), 25)
             artist_max_length = min(max(len(item['artist']) for item in wp_data), 40)
             for wp_user in wp_data:
-                s = f"{wp_user['nick'].ljust(user_max_length)[:user_max_length]}  {wp_user['artist'].ljust(artist_max_length)[:artist_max_length]}  {wp_user['track']}"
+                nick = wp_user['nick'].ljust(user_max_length)[:user_max_length]
+                artist = wp_user['artist'].ljust(artist_max_length)[:artist_max_length]
+                s = f"{nick}  {artist}  {wp_user['track']}"
                 irc.reply(s, prefixNick=False)
 
     @wrap(["something"])
@@ -488,19 +533,24 @@ class LastFM(callbacks.Plugin):
         self.db.set(msg.prefix, newId)
         irc.reply("you are now https://www.last.fm/user/%s" % newId)
 
-    @wrap([optional("something"), optional("something")])
-    def topartists(self, irc, msg, args, duration, user):
-        """[<duration>] [<user>]
+    @wrap([any("something")])
+    def topartists(self, irc, msg, args, query):
+        """[<nick|LastFM user>] [<duration>]
 
-        Reports the top 10 artists for the current user (or the one specified). Duration: overall | 7day | 1month | 3month | 6month | 12month (default: 6 months)
+        Reports the top 10 artists for the current user or the one specified.
+        Duration: overall | 7day | 1month | 3month | 6month | 12month
+        (default: 6 months). The user and duration may be given in either
+        order.
         """
-        nick, user = self.get_user(msg, user, irc)
-        artists, duration, duration_dict = self.get_topartists(irc, msg, user, duration)
+        user, duration = self.parse_user_duration(irc, query)
+        nick, user = self.resolve_display_user(irc, msg, user)
+        artists = self.get_topartists(irc, user, duration)
         if not artists:
             irc.reply("No top artists for %s" % nick)
             return
 
-        outstr = "%s's top artists %s are:" % (nick, duration_dict[duration])
+        outstr = "%s's top artists %s are:" % (
+            nick, self.duration_labels[duration])
         for artist in artists:
             outstr = outstr + (" %s [%s]," % (ircutils.bold(artist['name']), artist['playcount']))
 
@@ -508,28 +558,31 @@ class LastFM(callbacks.Plugin):
 
         irc.reply(outstr)
 
-    @wrap([optional("something"), optional("something")])
-    def toptags(self, irc, msg, args, user, duration):
-        """[<user>] [<duration>]
+    @wrap([any("something")])
+    def toptags(self, irc, msg, args, query):
+        """[<nick|LastFM user>] [<duration>]
 
-        Reports the top 10 tags for the user. Duration: overall | 7day | 1month | 3month | 6month | 12month (default: 6 months)
+        Reports the top 10 tags for the user. Duration: overall | 7day |
+        1month | 3month | 6month | 12month (default: 6 months). The user and
+        duration may be given in either order.
         """
 
-        nick, user = self.get_user(msg, user, irc)
-        artists, duration, duration_dict = self.get_topartists(irc, msg, user, duration)
+        user, duration = self.parse_user_duration(irc, query)
+        nick, user = self.resolve_display_user(irc, msg, user)
+        artists = self.get_topartists(irc, user, duration)
         tags = []
         for artist in artists:
             tags += self.get_artist_tags(artist['name'], irc)
 
-        tags = [tag.lower() for tag in tags if tag.lower() != 'seen live']
-        if not tags:
+        tag_counts = Counter(
+            tag.lower() for tag in tags if tag.lower() != 'seen live')
+        if not tag_counts:
             irc.reply('No top tags for {}'.format(nick))
             return
 
-        counts = [[tag, tags.count(tag)] for tag in set(tags)]
-        counts = sorted(counts, key=lambda x: -x[1])
-
-        outstr = "{nick}'s top tags {duration} are:".format(nick=nick, duration=duration_dict[duration])
+        outstr = "{nick}'s top tags {duration} are:".format(
+            nick=nick, duration=self.duration_labels[duration])
+        counts = sorted(tag_counts.items(), key=lambda item: (-item[1], item[0]))
         for tag, count in counts[:10]:
             outstr += ' {tag} [{count}],'.format(tag=tag.title(), count=count)
         outstr = outstr[:-1]

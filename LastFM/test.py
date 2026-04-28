@@ -70,13 +70,16 @@ def topartists_payload(*artists):
 
 
 class FakeHttpResponse(dict):
-    status = 403
-    reason = "Forbidden"
+    def __init__(self, status=403, reason="Forbidden"):
+        super().__init__()
+        self.status = status
+        self.reason = reason
 
 
 class FailingYouTube:
-    def __init__(self, counter):
+    def __init__(self, counter, error):
         self.counter = counter
+        self.error = error
 
     def search(self):
         return self
@@ -86,7 +89,7 @@ class FailingYouTube:
 
     def execute(self):
         self.counter["execute"] += 1
-        raise HttpError(FakeHttpResponse(), b'{"error": {"status": "denied"}}')
+        raise self.error
 
 
 class LastFMTestCase(PluginTestCase):
@@ -220,10 +223,14 @@ class LastFMTestCase(PluginTestCase):
                    side_effect=self.lastfm_get_url(handlers)):
             self.assertResponse("np krf", "Artist \u2014 Track")
 
-    def testYoutubeHttpErrorDisablesFurtherYoutubeLookups(self):
+    def testYoutubeKeyRestrictionDisablesFurtherYoutubeLookups(self):
         conf.supybot.plugins.LastFM.fetchYouTubeLink.setValue(True)
         conf.supybot.plugins.LastFM.youtubeApiKey.setValue('bad-key')
         counter = {"execute": 0}
+        error = HttpError(
+            FakeHttpResponse(
+                reason="The provided API key has an IP address restriction."),
+            b'{"error": {"status": "PERMISSION_DENIED"}}')
         handlers = {
             "user.getrecenttracks": lambda query: recent_track_payload(
                 artist="Artist", track="Track"),
@@ -232,13 +239,36 @@ class LastFMTestCase(PluginTestCase):
         }
 
         with patch('LastFM.plugin.build',
-                   return_value=FailingYouTube(counter)):
+                   return_value=FailingYouTube(counter, error)):
             with patch('LastFM.plugin.utils.web.getUrl',
                        side_effect=self.lastfm_get_url(handlers)):
                 self.assertResponse("np krf", "Artist \u2014 Track")
                 self.assertResponse("np krf", "Artist \u2014 Track")
 
         self.assertEqual(counter["execute"], 1)
+
+    def testYoutubeTransientHttpErrorDoesNotDisableFurtherLookups(self):
+        conf.supybot.plugins.LastFM.fetchYouTubeLink.setValue(True)
+        conf.supybot.plugins.LastFM.youtubeApiKey.setValue('test-youtube-key')
+        counter = {"execute": 0}
+        error = HttpError(
+            FakeHttpResponse(status=503, reason="Service Unavailable"),
+            b'{"error": {"status": "UNAVAILABLE"}}')
+        handlers = {
+            "user.getrecenttracks": lambda query: recent_track_payload(
+                artist="Artist", track="Track"),
+            "artist.getinfo": lambda query: {"artist": {"tags": {"tag": []}}},
+            "track.getInfo": lambda query: {"track": {}},
+        }
+
+        with patch('LastFM.plugin.build',
+                   return_value=FailingYouTube(counter, error)):
+            with patch('LastFM.plugin.utils.web.getUrl',
+                       side_effect=self.lastfm_get_url(handlers)):
+                self.assertResponse("np krf", "Artist \u2014 Track")
+                self.assertResponse("np krf", "Artist \u2014 Track")
+
+        self.assertEqual(counter["execute"], 2)
 
     def testWhoPlayingSkipsUsersWithoutHostmasks(self):
         state = self.irc.state.channels.setdefault(

@@ -334,6 +334,32 @@ class LastFM(callbacks.Plugin):
             reason = 'HTTP error'
         return "HTTP %s: %s" % (status, reason)
 
+    def is_permanent_youtube_error(self, error):
+        status = getattr(error.resp, 'status', None)
+        if status in (400, 401):
+            return True
+
+        if status != 403:
+            return False
+
+        error_text = self.youtube_http_error(error).lower()
+        content = getattr(error, 'content', b'')
+        if isinstance(content, bytes):
+            content = content.decode('utf-8', 'replace')
+        error_text += ' ' + str(content).lower()
+
+        permanent_markers = (
+            'api key not valid',
+            'api key has an ip address restriction',
+            'api key has referer restrictions',
+            'accessnotconfigured',
+            'api has not been used',
+        )
+        for marker in permanent_markers:
+            if marker in error_text:
+                return True
+        return False
+
     def get_youtube_link(self, artist, track):
         youtube = self.get_youtube_client()
         if youtube is None:
@@ -348,14 +374,17 @@ class LastFM(callbacks.Plugin):
                 type="video"
             ).execute()
         except HttpError as e:
-            self.disable_youtube(
-                youtubeApiKey, "YouTube API error %s" % self.youtube_http_error(e))
+            error = self.youtube_http_error(e)
+            if self.is_permanent_youtube_error(e):
+                self.disable_youtube(youtubeApiKey, "YouTube API error %s" % error)
+            else:
+                self.log.warning("LastFM: YouTube API error %s", error)
             return ''
         except BrokenPipeError as e:
-            self.disable_youtube(youtubeApiKey, "YouTube API error: %s" % e)
+            self.log.warning("LastFM: YouTube API error: %s", e)
             return ''
         except Exception as e:
-            self.disable_youtube(youtubeApiKey, "YouTube API error: %s" % e)
+            self.log.warning("LastFM: YouTube API error: %s", e)
             return ''
 
         for item in search_response.get("items", []):

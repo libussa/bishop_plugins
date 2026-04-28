@@ -14,6 +14,7 @@ import re
 import requests
 import io
 import pycurl
+from concurrent.futures import ThreadPoolExecutor, as_completed
 try:
     from urllib.parse import urlencode
     from urllib.parse import urlparse, parse_qsl, parse_qs
@@ -26,7 +27,6 @@ from urllib.parse import urlparse, parse_qs, parse_qsl
 import datetime
 from jinja2 import Template
 from datetime import timedelta
-import timeout_decorator
 import unicodedata
 import supybot.ircdb as ircdb
 import supybot.log as log
@@ -67,6 +67,7 @@ class SpiffyTitles(callbacks.Plugin):
     }
     wall_clock_timeout = 8
     max_request_retries = 3
+    title_fetch_workers = 4
     imgur_client = None
     bad_url_title = "^ <bad url>"
 
@@ -524,9 +525,29 @@ class SpiffyTitles(callbacks.Plugin):
         """
         titles = []
         include_bad_urls = len(urls) > 1
+        titles_by_index = {}
 
-        for index, url in enumerate(urls, start=1):
-            title = self.get_title_by_message_url(url, channel)
+        if not urls:
+            return titles
+
+        max_workers = min(self.title_fetch_workers, len(urls))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(self.get_title_by_message_url, url, channel): (index, url)
+                for index, url in enumerate(urls, start=1)
+            }
+
+            for future in as_completed(futures):
+                index, url = futures[future]
+
+                try:
+                    titles_by_index[index] = future.result()
+                except Exception as e:
+                    log.error("SpiffyTitles: error getting title for %s: %s" % (url, e))
+                    titles_by_index[index] = None
+
+        for index in range(1, len(urls) + 1):
+            title = titles_by_index.get(index)
 
             if title is not None and title:
                 titles.append((index, title))
@@ -1526,7 +1547,6 @@ class SpiffyTitles(callbacks.Plugin):
                     if len(title):
                         return title
 
-    @timeout_decorator.timeout(wall_clock_timeout)
     def get_source_by_url(self, url, retries=1):
         """
         Get the HTML of a website based on a URL.
@@ -1555,7 +1575,7 @@ class SpiffyTitles(callbacks.Plugin):
             curl.setopt(pycurl.HTTPHEADER, headers)
             curl.setopt(pycurl.WRITEDATA, body)
             curl.setopt(pycurl.FOLLOWLOCATION, True)
-            curl.setopt(pycurl.TIMEOUT, 10)
+            curl.setopt(pycurl.TIMEOUT, self.wall_clock_timeout)
             curl.setopt(pycurl.NOSIGNAL, 1)
             curl.perform()
 
@@ -1591,10 +1611,6 @@ class SpiffyTitles(callbacks.Plugin):
                 log.error("SpiffyTitles HTTP response code %s - %s" %
                           (status_code, body.getvalue()))
 
-        except timeout_decorator.TimeoutError:
-            log.debug("SpiffyTitles: wall timeout for %s", url)
-
-            return self.get_source_by_url(url, retries + 1)
         except TimeoutError as e:
             log.debug("SpiffyTitles Timeout: %s" % (str(e)))
 

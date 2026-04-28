@@ -9,6 +9,8 @@ from supybot.test import *
 import datetime
 import json
 import os
+import time
+from concurrent.futures import ThreadPoolExecutor as RealThreadPoolExecutor
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -112,9 +114,16 @@ class SpiffyTitlesTestCase(ChannelPluginTestCase):
     def testMultiUrlMessagePreservesIndexWhenMiddleUrlFails(self):
         plugin = self.irc.getCallback('SpiffyTitles')
 
+        def get_title(url, channel):
+            if url == 'https://google.com':
+                time.sleep(0.05)
+                return '^ Google'
+            if url == 'https://www.amazon.fr/dp/B0CTH7CVGB':
+                return '^ by Amazon Spaghetti Au Blé Complet'
+            return None
+
         with patch.object(plugin, 'get_title_by_message_url',
-                          side_effect=['^ Google', None,
-                                       '^ by Amazon Spaghetti Au Blé Complet']):
+                          side_effect=get_title):
             titles = plugin.get_titles_by_urls([
                 'https://google.com',
                 'https://dead.example',
@@ -128,6 +137,39 @@ class SpiffyTitlesTestCase(ChannelPluginTestCase):
         ])
         self.assertEqual(plugin.get_numbered_title_response(titles),
                          '[1] Google [2] <bad url> [3] by Amazon Spaghetti Au Blé Complet')
+
+    def testMultiUrlFetchesWithAtMostFourWorkers(self):
+        plugin = self.irc.getCallback('SpiffyTitles')
+        created_workers = []
+
+        class CapturingThreadPoolExecutor(RealThreadPoolExecutor):
+            def __init__(self, *args, **kwargs):
+                if 'max_workers' in kwargs:
+                    created_workers.append(kwargs['max_workers'])
+                elif args:
+                    created_workers.append(args[0])
+                else:
+                    created_workers.append(None)
+
+                super(CapturingThreadPoolExecutor, self).__init__(*args, **kwargs)
+
+        urls = ['https://example.com/%s' % i for i in range(6)]
+
+        with patch('SpiffyTitles.plugin.ThreadPoolExecutor',
+                   CapturingThreadPoolExecutor):
+            with patch.object(plugin, 'get_title_by_message_url',
+                              side_effect=lambda url, channel: '^ ' + url.rsplit('/', 1)[-1]):
+                titles = plugin.get_titles_by_urls(urls, self.channel)
+
+        self.assertEqual(created_workers, [4])
+        self.assertEqual(titles, [
+            (1, '^ 0'),
+            (2, '^ 1'),
+            (3, '^ 2'),
+            (4, '^ 3'),
+            (5, '^ 4'),
+            (6, '^ 5'),
+        ])
 
     def testSingleBadUrlStaysQuiet(self):
         plugin = self.irc.getCallback('SpiffyTitles')
@@ -194,6 +236,7 @@ class SpiffyTitlesTestCase(ChannelPluginTestCase):
             headers)
         self.assertFalse(any(header.lower().startswith('accept-encoding:')
                              for header in headers))
+        self.assertEqual(curl.options[fake.TIMEOUT], plugin.wall_clock_timeout)
         self.assertTrue(curl.closed)
 
     def testGetHeadersUsesBrowserNavigationHeaders(self):

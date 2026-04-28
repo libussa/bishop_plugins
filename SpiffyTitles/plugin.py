@@ -74,6 +74,7 @@ class SpiffyTitles(callbacks.Plugin):
         self.add_dailymotion_handlers()
         self.add_wikipedia_handlers()
         self.add_reddit_handlers()
+        self.add_amazon_handlers()
         self.add_gazelle_handlers()
 
     def add_dailymotion_handlers(self):
@@ -93,6 +94,20 @@ class SpiffyTitles(callbacks.Plugin):
     def add_reddit_handlers(self):
         self.handlers["reddit.com"] = self.handler_reddit
         self.handlers["www.reddit.com"] = self.handler_reddit
+
+    def add_amazon_handlers(self):
+        for domain in (
+                "amazon.fr", "www.amazon.fr",
+                "amazon.de", "www.amazon.de",
+                "amazon.com", "www.amazon.com",
+                "amazon.co.uk", "www.amazon.co.uk",
+                "amazon.it", "www.amazon.it",
+                "amazon.es", "www.amazon.es",
+                "amazon.nl", "www.amazon.nl",
+                "amazon.se", "www.amazon.se",
+                "amazon.pl", "www.amazon.pl",
+                "amazon.ca", "www.amazon.ca"):
+            self.handlers[domain] = self.handler_amazon
 
 
     def add_gazelle_handlers(self):
@@ -993,6 +1008,92 @@ class SpiffyTitles(callbacks.Plugin):
         else:
             log.debug("SpiffyTitles: default handler fired but doing nothing because disabled")
 
+    def handler_amazon(self, url, info, channel):
+        """
+        Amazon often uses a generic <title>. Prefer product metadata when the
+        product page HTML is available.
+        """
+        default_handler_enabled = self.registryValue("defaultHandlerEnabled", channel=channel)
+
+        if not default_handler_enabled:
+            return
+
+        log.debug("SpiffyTitles: calling Amazon handler for %s" % (url))
+        default_template = Template(self.registryValue("defaultTitleTemplate", channel=channel))
+        (html, is_redirect, real_domain) = self.get_source_by_url(url)
+
+        if html is not None and html:
+            title = self.get_amazon_title_from_html(html)
+            if title is None:
+                title = self.get_title_from_html(html)
+
+            if title is not None:
+                return default_template.render(
+                    title=title, redirect=is_redirect, real_domain=real_domain)
+
+    def get_amazon_title_from_html(self, html):
+        soup = BeautifulSoup(html, "lxml")
+        if soup is None:
+            return
+
+        for selector in (
+                "#productTitle",
+                "#title #productTitle",
+                "#ebooksProductTitle",
+                "#btAsinTitle"):
+            match = soup.select_one(selector)
+            if match:
+                title = match.get_text(" ", strip=True)
+                if title:
+                    return title
+
+        for attrs in (
+                {"property": "og:title"},
+                {"name": "title"},
+                {"name": "twitter:title"}):
+            match = soup.find("meta", attrs=attrs)
+            if match and match.get("content"):
+                title = match["content"].strip()
+                if title and not self.is_generic_amazon_title(title):
+                    return title
+
+        for script in soup.find_all("script", type="application/ld+json"):
+            try:
+                data = json.loads(script.string or "")
+            except ValueError:
+                continue
+            title = self.get_product_name_from_jsonld(data)
+            if title:
+                return title
+
+    def get_product_name_from_jsonld(self, data):
+        if isinstance(data, list):
+            for item in data:
+                title = self.get_product_name_from_jsonld(item)
+                if title:
+                    return title
+        elif isinstance(data, dict):
+            graph = data.get("@graph")
+            if graph:
+                title = self.get_product_name_from_jsonld(graph)
+                if title:
+                    return title
+
+            type_value = data.get("@type")
+            if isinstance(type_value, list):
+                is_product = "Product" in type_value
+            else:
+                is_product = type_value == "Product"
+            name = data.get("name")
+            if is_product and isinstance(name, str) and name.strip():
+                return name.strip()
+
+    def is_generic_amazon_title(self, title):
+        return title.strip().lower() in {
+            "amazon.fr", "amazon.de", "amazon.com", "amazon.co.uk",
+            "amazon.it", "amazon.es", "amazon.nl", "amazon.se",
+            "amazon.pl", "amazon.ca"}
+
     def handler_imdb(self, url, info, channel):
         """
         Handles imdb.com links, querying IMDb suggestions for additional info
@@ -1549,10 +1650,21 @@ class SpiffyTitles(callbacks.Plugin):
     def get_headers(self):
         agent = self.get_user_agent()
         self.accept_language = self.registryValue("language")
+        languages = [self.accept_language]
+        base_language = self.accept_language.split("-", 1)[0]
+        if base_language and base_language != self.accept_language:
+            languages.append("%s;q=0.9" % base_language)
+        languages.extend(["en-US;q=0.5", "en;q=0.3"])
 
         headers = {
             "User-Agent": agent,
-            "Accept-Language": ";".join((self.accept_language, "q=1.0"))
+            "Accept": ("text/html,application/xhtml+xml,application/xml;q=0.9,"
+                       "image/avif,image/webp,*/*;q=0.8"),
+            "Accept-Language": ",".join(languages),
+            "Accept-Encoding": "gzip, deflate",
+            "DNT": "1",
+            "Connection": "close",
+            "Upgrade-Insecure-Requests": "1",
         }
 
         return headers

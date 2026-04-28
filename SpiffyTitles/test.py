@@ -92,6 +92,41 @@ class SpiffyTitlesTestCase(ChannelPluginTestCase):
             self.assertEqual(plugin.handler_default('https://example.com', self.channel),
                              '^ Example title')
 
+    def testAmazonHandlerPrefersProductTitle(self):
+        plugin = self.irc.getCallback('SpiffyTitles')
+        html = '''
+            <html>
+              <head><title>Amazon.fr</title></head>
+              <body>
+                <span id="productTitle">
+                  by Amazon Spaghetti Au Blé Complet, 500g
+                </span>
+              </body>
+            </html>
+        '''
+
+        with patch.object(plugin, 'get_source_by_url',
+                          return_value=(html, False, None)):
+            self.assertEqual(
+                plugin.handler_amazon(
+                    'https://www.amazon.fr/dp/B0CTH7CVGB',
+                    urlparse('https://www.amazon.fr/dp/B0CTH7CVGB'),
+                    self.channel),
+                '^ by Amazon Spaghetti Au Blé Complet, 500g')
+
+    def testGetHeadersUsesBrowserNavigationHeaders(self):
+        plugin = self.irc.getCallback('SpiffyTitles')
+        conf.supybot.plugins.SpiffyTitles.language.setValue('fr-FR')
+
+        headers = plugin.get_headers()
+
+        self.assertIn('text/html', headers['Accept'])
+        self.assertEqual(headers['Accept-Language'],
+                         'fr-FR,fr;q=0.9,en-US;q=0.5,en;q=0.3')
+        self.assertEqual(headers['Accept-Encoding'], 'gzip, deflate')
+        self.assertEqual(headers['DNT'], '1')
+        self.assertEqual(headers['Upgrade-Insecure-Requests'], '1')
+
     def testYoutubeHandler(self):
         plugin = self.irc.getCallback('SpiffyTitles')
         conf.supybot.plugins.SpiffyTitles.youtubeDeveloperKey.setValue('test-key')

@@ -12,13 +12,13 @@ import supybot.ircutils as ircutils
 import supybot.callbacks as callbacks
 import re
 import requests
+import io
+import pycurl
 try:
     from urllib.parse import urlencode
     from urllib.parse import urlparse, parse_qsl, parse_qs
 except ImportError:
     from urllib.parse import urlencode, urlparse, parse_qsl, parse_qs
-from urllib import error as urllib_error
-from urllib import request as urllib_request
 from bs4 import BeautifulSoup
 import random
 import json
@@ -1540,14 +1540,23 @@ class SpiffyTitles(callbacks.Plugin):
         if not urlparse(url).scheme:
             return self.get_source_by_url("http://%s" % url)
 
-        log.debug("SpiffyTitles: urllib attempt #%s for %s" % (retries, url))
+        log.debug("SpiffyTitles: pycurl attempt #%s for %s" % (retries, url))
+
+        curl = pycurl.Curl()
+        body = io.BytesIO()
 
         try:
-            headers = self.get_headers()
-            request = urllib_request.Request(url, headers=headers)
-            response = urllib_request.urlopen(request, timeout=10)
-            final_url = response.geturl()
-            status_code = response.getcode()
+            headers = ["%s: %s" % item for item in self.get_headers().items()]
+            curl.setopt(pycurl.URL, url)
+            curl.setopt(pycurl.HTTPHEADER, headers)
+            curl.setopt(pycurl.WRITEDATA, body)
+            curl.setopt(pycurl.FOLLOWLOCATION, True)
+            curl.setopt(pycurl.TIMEOUT, 10)
+            curl.setopt(pycurl.NOSIGNAL, 1)
+            curl.perform()
+
+            final_url = curl.getinfo(pycurl.EFFECTIVE_URL)
+            status_code = curl.getinfo(pycurl.RESPONSE_CODE)
             is_redirect = False
             real_domain = None
 
@@ -1558,13 +1567,13 @@ class SpiffyTitles(callbacks.Plugin):
                 real_domain = final_domain
 
             if status_code == requests.codes.ok:
-                content_type = (response.headers.get("content-type") or "").split(";")[0].strip()
+                content_type = (curl.getinfo(pycurl.CONTENT_TYPE) or "").split(";")[0].strip()
                 acceptable_types = self.registryValue("mimeTypes")
 
                 log.debug("SpiffyTitles: content type %s" % (content_type))
 
                 if content_type in acceptable_types:
-                    text = response.read()
+                    text = body.getvalue()
 
                     if text:
                         return (text, is_redirect, real_domain)
@@ -1576,7 +1585,7 @@ class SpiffyTitles(callbacks.Plugin):
                               (content_type, url))
             else:
                 log.error("SpiffyTitles HTTP response code %s - %s" %
-                          (status_code, response.read()))
+                          (status_code, body.getvalue()))
 
         except timeout_decorator.TimeoutError:
             log.debug("SpiffyTitles: wall timeout for %s", url)
@@ -1586,12 +1595,19 @@ class SpiffyTitles(callbacks.Plugin):
             log.debug("SpiffyTitles Timeout: %s" % (str(e)))
 
             return self.get_source_by_url(url, retries + 1)
-        except urllib_error.HTTPError as e:
-            log.error("SpiffyTitles HTTP response code %s - %s" % (e.code, e.read()))
-        except urllib_error.URLError as e:
+        except pycurl.error as e:
+            error_code = e.args[0] if len(e.args) else None
+
+            if error_code == pycurl.E_OPERATION_TIMEDOUT:
+                log.debug("SpiffyTitles Timeout: %s" % (str(e)))
+
+                return self.get_source_by_url(url, retries + 1)
+
             log.debug("SpiffyTitles ConnectionError: %s" % (str(e)))
         except ValueError as e:
             log.error("SpiffyTitles InvalidURL: %s" % (str(e)))
+        finally:
+            curl.close()
 
         return (None, False, None)
 

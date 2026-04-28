@@ -12,7 +12,6 @@ import os
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
-from urllib import error as urllib_error
 from urllib.parse import urlparse
 
 import requests
@@ -23,13 +22,56 @@ def response(payload, status_code=200):
     return SimpleNamespace(status_code=status_code, text=json.dumps(payload))
 
 
-def urllib_response(payload, url='https://example.com'):
-    return SimpleNamespace(
-        getcode=lambda: 200,
-        geturl=lambda: url,
-        headers={'content-type': 'text/html; charset=UTF-8'},
-        read=lambda: payload,
+class FakeCurl:
+    def __init__(self, pycurl, payload, url='https://example.com',
+                 status_code=200, content_type='text/html; charset=UTF-8',
+                 error=None):
+        self.pycurl = pycurl
+        self.payload = payload
+        self.url = url
+        self.status_code = status_code
+        self.content_type = content_type
+        self.error = error
+        self.options = {}
+        self.closed = False
+
+    def setopt(self, option, value):
+        self.options[option] = value
+
+    def perform(self):
+        if self.error:
+            raise self.error
+        self.options[self.pycurl.WRITEDATA].write(self.payload)
+
+    def getinfo(self, info):
+        if info == self.pycurl.EFFECTIVE_URL:
+            return self.url
+        if info == self.pycurl.RESPONSE_CODE:
+            return self.status_code
+        if info == self.pycurl.CONTENT_TYPE:
+            return self.content_type
+
+    def close(self):
+        self.closed = True
+
+
+def fake_pycurl(payload=b'', url='https://example.com', error=None):
+    fake = SimpleNamespace(
+        URL='URL',
+        HTTPHEADER='HTTPHEADER',
+        WRITEDATA='WRITEDATA',
+        FOLLOWLOCATION='FOLLOWLOCATION',
+        TIMEOUT='TIMEOUT',
+        NOSIGNAL='NOSIGNAL',
+        EFFECTIVE_URL='EFFECTIVE_URL',
+        RESPONSE_CODE='RESPONSE_CODE',
+        CONTENT_TYPE='CONTENT_TYPE',
+        E_OPERATION_TIMEDOUT=28,
     )
+    fake.error = type('FakePycurlError', (Exception,), {})
+    curl = FakeCurl(fake, payload, url=url, error=error)
+    fake.Curl = lambda: curl
+    return fake, curl
 
 
 class SpiffyTitlesTestCase(ChannelPluginTestCase):
@@ -83,14 +125,14 @@ class SpiffyTitlesTestCase(ChannelPluginTestCase):
 
     def testDeadDefaultUrlDoesNotLogAsError(self):
         plugin = self.irc.getCallback('SpiffyTitles')
+        fake, curl = fake_pycurl()
+        curl.error = fake.error(6, 'no dns')
 
-        with patch('SpiffyTitles.plugin.urllib_request.urlopen',
-                   side_effect=urllib_error.URLError("no dns")) as get:
+        with patch('SpiffyTitles.plugin.pycurl', fake):
             with patch('SpiffyTitles.plugin.log.error') as error_log:
                 self.assertEqual(plugin.get_source_by_url('https://dead.example'),
                                  (None, False, None))
 
-        self.assertEqual(get.call_count, 1)
         error_log.assert_not_called()
 
     def testDefaultHandler(self):
@@ -118,24 +160,26 @@ class SpiffyTitlesTestCase(ChannelPluginTestCase):
                     self.channel),
                 '^ by Amazon Spaghetti Au Blé Complet, 500g')
 
-    def testAmazonSourceFetchUsesUrllibWithoutRequestsDefaultHeaders(self):
+    def testSourceFetchUsesPycurlWithoutRequestsDefaultHeaders(self):
         plugin = self.irc.getCallback('SpiffyTitles')
         conf.supybot.plugins.SpiffyTitles.language.setValue('fr-FR')
 
         html = b'<html><head><title>Example title</title></head></html>'
         url = 'https://www.amazon.fr/dp/B0CTH7CVGB'
-        with patch('SpiffyTitles.plugin.urllib_request.urlopen',
-                   return_value=urllib_response(html, url=url)) as urlopen:
+        fake, curl = fake_pycurl(html, url=url)
+        with patch('SpiffyTitles.plugin.pycurl', fake):
             self.assertEqual(
                 plugin.get_source_by_url(url),
                 (html, False, None))
 
-        request = urlopen.call_args.args[0]
-        headers = {key.lower(): value for key, value in request.header_items()}
-        self.assertEqual(headers['user-agent'],
-                         'Mozilla/5.0 (X11; Linux x86_64; rv:140.0) '
-                         'Gecko/20100101 Firefox/140.0')
-        self.assertNotIn('accept-encoding', headers)
+        headers = curl.options[fake.HTTPHEADER]
+        self.assertIn(
+            'User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:140.0) '
+            'Gecko/20100101 Firefox/140.0',
+            headers)
+        self.assertFalse(any(header.lower().startswith('accept-encoding:')
+                             for header in headers))
+        self.assertTrue(curl.closed)
 
     def testGetHeadersUsesBrowserNavigationHeaders(self):
         plugin = self.irc.getCallback('SpiffyTitles')

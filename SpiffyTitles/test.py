@@ -120,6 +120,9 @@ class SpiffyTitlesTestCase(ChannelPluginTestCase):
 
         headers = plugin.get_headers()
 
+        self.assertEqual(headers['User-Agent'],
+                         'Mozilla/5.0 (X11; Linux x86_64; rv:140.0) '
+                         'Gecko/20100101 Firefox/140.0')
         self.assertIn('text/html', headers['Accept'])
         self.assertEqual(headers['Accept-Language'],
                          'fr-FR,fr;q=0.9,en-US;q=0.5,en;q=0.3')

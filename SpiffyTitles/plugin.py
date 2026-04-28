@@ -1723,7 +1723,6 @@ class SpiffyTitles(callbacks.Plugin):
             "Accept": ("text/html,application/xhtml+xml,application/xml;q=0.9,"
                        "image/avif,image/webp,*/*;q=0.8"),
             "Accept-Language": ",".join(languages),
-            "Accept-Encoding": "gzip, deflate",
             "DNT": "1",
             "Connection": "close",
             "Upgrade-Insecure-Requests": "1",

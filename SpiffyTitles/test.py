@@ -126,7 +126,7 @@ class SpiffyTitlesTestCase(ChannelPluginTestCase):
         self.assertIn('text/html', headers['Accept'])
         self.assertEqual(headers['Accept-Language'],
                          'fr-FR,fr;q=0.9,en-US;q=0.5,en;q=0.3')
-        self.assertEqual(headers['Accept-Encoding'], 'gzip, deflate')
+        self.assertNotIn('Accept-Encoding', headers)
         self.assertEqual(headers['DNT'], '1')
         self.assertEqual(headers['Upgrade-Insecure-Requests'], '1')
 

@@ -30,31 +30,127 @@
 ###
 
 from supybot.test import *
-import os
+import json
+from urllib import parse
+from unittest.mock import patch
+import supybot.utils as utils
+
+
+def response(payload):
+    return json.dumps(payload).encode("utf-8")
+
+
+def recent_track_payload(artist="Artist & Co", track="Song + Tune"):
+    return {
+        "recenttracks": {
+            "@attr": {"user": "krf"},
+            "track": [{
+                "artist": {"#text": artist},
+                "name": track,
+                "album": {"#text": "Album"},
+            }],
+        },
+    }
+
 
 class LastFMTestCase(PluginTestCase):
     plugins = ('LastFM',)
 
     def setUp(self):
         PluginTestCase.setUp(self)
-        self.prefix = "a!b@c.d"
-        apiKey = os.environ.get('lastfm_apikey')
-        if not apiKey:
-            e = ("The LastFM API key has not been set. "
-                 "Please set the environment variable 'lastfm_apikey' "
-                 "and try again.")
-            raise callbacks.Error(e)
-        conf.supybot.plugins.LastFM.apiKey.setValue(apiKey)
+        conf.supybot.plugins.LastFM.apiKey.setValue('test-api-key')
+        conf.supybot.plugins.LastFM.youtubeApiKey.setValue('')
+        conf.supybot.plugins.LastFM.fetchYouTubeLink.setValue(False)
+
+    def lastfm_get_url(self, handlers):
+        def get_url(url):
+            query = parse.parse_qs(parse.urlparse(url).query)
+            self.assertEqual(query["api_key"], ["test-api-key"])
+            method = query["method"][0]
+            return response(handlers[method](query))
+        return get_url
 
     def testNowPlaying(self):
-        self.assertNotError("np krf")
+        def track_info(query):
+            self.assertEqual(query["artist"], ["Artist & Co"])
+            self.assertEqual(query["track"], ["Song + Tune"])
+            return {"track": {"userplaycount": "4"}}
 
-    def testLastfmDB(self):
-        self.assertNotError("lastfm set GLolol") # test db
-        self.assertNotError("np")
+        handlers = {
+            "user.getrecenttracks": lambda query: recent_track_payload(),
+            "artist.getinfo": lambda query: {
+                "artist": {
+                    "tags": {
+                        "tag": [
+                            {"name": "indie"},
+                            {"name": "seen live"},
+                            {"name": "rock"},
+                        ],
+                    },
+                },
+            },
+            "track.getInfo": track_info,
+        }
 
-    def testProfile(self):
-        self.assertNotError("profile czshadow")
-        self.assertNotError("profile test")
+        with patch('LastFM.plugin.utils.web.getUrl',
+                   side_effect=self.lastfm_get_url(handlers)):
+            self.assertResponse(
+                "np krf",
+                "Artist & Co \u2014 Song + Tune \u2014 indie, rock \u2014 4x")
+
+    def testNowPlayingSurvivesOptionalMetadataErrors(self):
+        handlers = {
+            "user.getrecenttracks": lambda query: recent_track_payload(
+                artist="Artist", track="Track"),
+            "artist.getinfo": lambda query: {
+                "error": 6,
+                "message": "temporary tag failure",
+            },
+            "track.getInfo": lambda query: {
+                "error": 6,
+                "message": "temporary track failure",
+            },
+        }
+
+        with patch('LastFM.plugin.utils.web.getUrl',
+                   side_effect=self.lastfm_get_url(handlers)):
+            self.assertResponse("np krf", "Artist \u2014 Track")
+
+    def testNowPlayingReturnsLastfmApiErrorsToIrc(self):
+        handlers = {
+            "user.getrecenttracks": lambda query: {
+                "error": 6,
+                "message": "User not found",
+            },
+        }
+
+        with patch('LastFM.plugin.utils.web.getUrl',
+                   side_effect=self.lastfm_get_url(handlers)):
+            msg = self.assertError("np krf")
+
+        self.assertIn("Last.fm error: User not found", msg.args[1])
+        self.assertNotIn("administrator", msg.args[1].lower())
+
+    def testNowPlayingReturnsTransportErrorsToIrc(self):
+        with patch('LastFM.plugin.utils.web.getUrl',
+                   side_effect=utils.web.Error("timeout")):
+            msg = self.assertError("np krf")
+
+        self.assertIn("Last.fm is not responding right now", msg.args[1])
+        self.assertNotIn("administrator", msg.args[1].lower())
+
+    def testYoutubeLinkWithoutKeyDoesNotBreakNowPlaying(self):
+        conf.supybot.plugins.LastFM.fetchYouTubeLink.setValue(True)
+        handlers = {
+            "user.getrecenttracks": lambda query: recent_track_payload(
+                artist="Artist", track="Track"),
+            "artist.getinfo": lambda query: {"artist": {"tags": {"tag": []}}},
+            "track.getInfo": lambda query: {"track": {}},
+        }
+
+        with patch('LastFM.plugin.utils.web.getUrl',
+                   side_effect=self.lastfm_get_url(handlers)):
+            self.assertResponse("np krf", "Artist \u2014 Track")
+
 
 # vim:set shiftwidth=4 tabstop=4 expandtab textwidth=79:

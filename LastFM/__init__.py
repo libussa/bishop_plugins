@@ -46,7 +46,8 @@ __author__ = supybot.Author("Kevin Funk", "KRF", "krf@electrostorm.net")
 # This is a dictionary mapping supybot.Author instances to lists of
 # contributions.
 __contributors__ = {
-            supybot.Author("Ilya Kuznetsov", "worklez", "worklez@gmail.com"): ["profile"],
+            supybot.Author("Ilya Kuznetsov", "worklez", "worklez@gmail.com"):
+            ["historical Last.fm profile support"],
             supybot.Author("Pavel Dvořák", "czshadow", "czshadow@gmail.com"):
             ["misc"],
             supybot.Author('James Lu', 'GLolol',
